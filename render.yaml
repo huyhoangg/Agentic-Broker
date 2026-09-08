@@ -1,0 +1,15 @@
+services:
+  - type: worker
+    name: tiktok-broker-audio-assistant
+    env: docker
+    dockerfilePath: ./Dockerfile
+    repo: https://github.com/YOUR_GITHUB_USERNAME/self-broker
+    envVars:
+      - key: TIKTOK_CHANNEL
+        value: "@broker_account_name"
+      - key: CHECK_INTERVAL
+        value: "180"
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
