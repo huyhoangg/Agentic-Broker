@@ -1,0 +1,7 @@
+node_modules/
+dist/
+recordings/
+bin/
+*.wav
+.DS_Store
+__pycache__/
