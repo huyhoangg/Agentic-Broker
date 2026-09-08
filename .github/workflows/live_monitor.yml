@@ -1,0 +1,37 @@
+name: TikTok Live Audio Broker Monitor
+
+on:
+  schedule:
+    # Run every 10 minutes to check if broker is live
+    - cron: '*/10 * * * *'
+  workflow_dispatch: # Allow manual trigger from GitHub UI
+
+jobs:
+  monitor-and-record:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install FFmpeg & System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Install Python Dependencies
+        run: |
+          pip install yt-dlp openai-whisper requests imageio-ffmpeg soundfile
+
+      - name: Run TikTok Live Monitor & Audio Streamer
+        env:
+          TIKTOK_CHANNEL: ${{ secrets.TIKTOK_CHANNEL || '@vtv24' }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python python/render_worker.py --single-check
