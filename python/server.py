@@ -28,6 +28,8 @@ from groq_whisper import transcribe_with_cloud_whisper
 from supabase_client import upload_audio_to_supabase
 from channel_manager import load_monitored_channels
 from telegram_command_listener import start_telegram_command_poller
+from groq_llm_analyzer import analyze_transcript_with_groq_llm
+from watchlist_manager import save_stock_digest_report
 
 # Trigger auto database table migrations on startup
 try:
@@ -164,26 +166,51 @@ def run_bulletproof_recording(stream_url: str, channel: str):
                     proc.kill()
                 break
 
-            # 2. Kiểm tra Lệnh BÁO CÁO TỨC THÌ từ Telegram (/report)
+            # 2. Kiểm tra Lệnh BÁO CÁO TỨC THÌ từ Telegram (/report) -> STT & AI Report On-Demand!
             if system_status.get("report_requested"):
                 system_status["report_requested"] = False
-                print("⚡ Đang tạo báo cáo trích xuất tức thì theo yêu cầu từ Telegram...")
+                print("⚡ Đang chạy STT & Phân tích Groq AI theo yêu cầu từ Telegram...")
                 mp3_files = sorted(glob.glob(os.path.join(session_dir, "part_*.mp3")))
                 if mp3_files:
                     latest_file = mp3_files[-1]
+                    send_telegram_message("⏳ <b>Đang chạy Whisper STT & Groq LLM bóc tách file audio 5 phút mới nhất...</b>")
+                    
                     raw_text = transcribe_with_cloud_whisper(latest_file)
                     detected_tickers = extract_vn_tickers(raw_text) if raw_text else []
                     ticker_str = ", ".join([t["ticker"] for t in detected_tickers]) if detected_tickers else "Chưa phát hiện mã"
                     
-                    send_telegram_message(
-                        f"📝 <b>BÁO CÁO TRÍCH XUẤT TỨC THÌ (REALTIME REPORT)</b>\n\n"
+                    clean_analysis = ""
+                    if raw_text and len(raw_text.strip()) > 10:
+                        ai_res = analyze_transcript_with_groq_llm(raw_text)
+                        clean_analysis = ai_res.get("clean_analysis", "")
+                        
+                        if detected_tickers:
+                            for tk_item in detected_tickers:
+                                save_stock_digest_report(
+                                    ticker=tk_item["ticker"],
+                                    channel=channel,
+                                    summary=clean_analysis,
+                                    raw_transcript=raw_text,
+                                    audio_url=system_status.get("latest_sub_url", "")
+                                )
+                    
+                    msg = (
+                        f"📝 <b>BÁO CÁO PHÂN TÍCH THEO YÊU CẦU (ON-DEMAND STT & AI REPORT)</b>\n\n"
                         f"👤 Broker: <b>{profile['display_name']}</b> ({channel})\n"
-                        f"⏱️ Thời điểm trích xuất: <code>{datetime.now().strftime('%H:%M:%S %d/%m/%Y')}</code>\n"
-                        f"🏷️ <b>Mã cổ phiếu phát hiện:</b> <b>{ticker_str}</b>\n\n"
-                        f"🗣️ <b>Nội dung trích đoạn:</b>\n<i>\"{raw_text[:400]}...\"</i>" if raw_text else "<i>(Chưa có âm thanh)</i>"
+                        f"⏱️ Thời điểm: <code>{datetime.now().strftime('%H:%M:%S %d/%m/%Y')}</code>\n"
+                        f"🏷️ <b>Mã phát hiện:</b> <b>{ticker_str}</b>\n\n"
                     )
+                    if clean_analysis:
+                        msg += f"📊 <b>Phân Tích AI Groq (Đã lọc bỏ tán gẫu):</b>\n{clean_analysis}\n\n"
+                    elif raw_text:
+                        msg += f"🗣️ <b>Trích đoạn văn bản:</b>\n<i>\"{raw_text[:400]}...\"</i>\n\n"
+                    else:
+                        msg += f"⚠️ Chưa thu thập đủ dữ liệu âm thanh để bóc tách.\n\n"
+                    
+                    msg += f"🛡️ <i>Dữ liệu đã được lưu xuống Supabase DB cho danh mục Watchlist của bạn!</i>"
+                    send_telegram_message(msg)
 
-            # 3. Auto-sync các phân đoạn 5 phút đã hoàn thành lên Supabase
+            # 3. Auto-sync các phân đoạn 5 phút đã hoàn thành lên Supabase (Ưu tiên lưu Audio 100%)
             mp3_files = sorted(glob.glob(os.path.join(session_dir, "part_*.mp3")))
             if len(mp3_files) > 1:
                 for seg_file in mp3_files[:-1]:
@@ -191,20 +218,41 @@ def run_bulletproof_recording(stream_url: str, channel: str):
                         uploaded_files.add(seg_file)
                         part_num = len(uploaded_files)
                         system_status["uploaded_parts"] = part_num
-                        print(f"☁️ [Auto-Sync Supabase] Đang backup Part #{part_num} lên Supabase...")
+                        print(f"☁️ [Auto-Sync Audio Supabase] Backup Part #{part_num} lên Supabase Storage...")
                         
                         sub_url = upload_audio_to_supabase(seg_file, channel)
-                        raw_text = transcribe_with_cloud_whisper(seg_file)
-                        detected_tickers = extract_vn_tickers(raw_text) if raw_text else []
-                        ticker_str = ", ".join([t["ticker"] for t in detected_tickers]) if detected_tickers else "Theo dõi"
+                        system_status["latest_sub_url"] = sub_url
 
-                        send_telegram_message(
-                            f"🛡️ <b>ĐÃ BACKUP THÀNH CÔNG PART #{part_num} LÊN SUPABASE</b>\n\n"
+                        # Kiểm tra nếu bật AUTO_STT_ON_RECORDING (mặc định False: Ưu tiên lấy Audio)
+                        auto_stt = os.getenv("AUTO_STT_ON_RECORDING", "false").lower() == "true"
+                        ticker_str = "Âm thanh đã lưu"
+                        clean_analysis = ""
+
+                        if auto_stt:
+                            raw_text = transcribe_with_cloud_whisper(seg_file)
+                            detected_tickers = extract_vn_tickers(raw_text) if raw_text else []
+                            ticker_str = ", ".join([t["ticker"] for t in detected_tickers]) if detected_tickers else "Theo dõi"
+                            if raw_text and len(raw_text.strip()) > 10:
+                                ai_res = analyze_transcript_with_groq_llm(raw_text)
+                                clean_analysis = ai_res.get("clean_analysis", "")
+                                if detected_tickers:
+                                    for tk_item in detected_tickers:
+                                        save_stock_digest_report(
+                                            ticker=tk_item["ticker"],
+                                            channel=channel,
+                                            summary=clean_analysis,
+                                            raw_transcript=raw_text,
+                                            audio_url=sub_url or ""
+                                        )
+
+                        tele_msg = (
+                            f"🛡️ <b>ĐÃ SAO LƯU THÀNH CÔNG AUDIO PART #{part_num} LÊN SUPABASE</b>\n\n"
                             f"👤 Broker: <b>{profile['display_name']}</b> ({channel})\n"
-                            f"⏱️ Thời lượng segment: <b>5 phút</b>\n"
-                            f"🏷️ Mã phát hiện: <b>{ticker_str}</b>\n"
-                            f"🔗 Link Supabase: {sub_url if sub_url else 'Đã lưu'}"
+                            f"⏱️ Thời lượng segment: <b>5 phút MP3</b>\n"
+                            f"🔗 Link Audio: {sub_url if sub_url else 'Đã lưu an toàn'}\n\n"
+                            f"💡 <i>Bấm nút <b>📝 Báo cáo ngay</b> hoặc gõ <code>/report</code> để bóc tách STT & Phân tích AI bất kỳ lúc nào!</i>"
                         )
+                        send_telegram_message(tele_msg)
 
         # Upload final remaining segment
         mp3_files = sorted(glob.glob(os.path.join(session_dir, "part_*.mp3")))
@@ -213,15 +261,12 @@ def run_bulletproof_recording(stream_url: str, channel: str):
                 uploaded_files.add(seg_file)
                 part_num = len(uploaded_files)
                 sub_url = upload_audio_to_supabase(seg_file, channel)
-                raw_text = transcribe_with_cloud_whisper(seg_file)
-                detected_tickers = extract_vn_tickers(raw_text) if raw_text else []
-                ticker_str = ", ".join([t["ticker"] for t in detected_tickers]) if detected_tickers else "Theo dõi"
 
                 send_telegram_message(
-                    f"✅ <b>HOÀN THÀNH TẬP TẬP BUỔI LIVE (PART #{part_num})</b>\n\n"
+                    f"✅ <b>HOÀN THÀNH KẾT THÚC BUỔI LIVE (PART #{part_num})</b>\n\n"
                     f"👤 Broker: <b>{profile['display_name']}</b> ({channel})\n"
-                    f"🏷️ Mã phát hiện: <b>{ticker_str}</b>\n"
-                    f"🎉 Tổng số <b>{len(uploaded_files)} phần âm thanh</b> đã được bảo vệ 100% trên Supabase!"
+                    f"🎉 Tổng số <b>{len(uploaded_files)} phần âm thanh</b> đã được bảo vệ 100% trên Supabase Storage!\n"
+                    f"💡 Dùng <code>/digest</code> trên Telegram để xem tổng hợp phân tích AI!"
                 )
 
         system_status["total_recorded_lives"] += 1

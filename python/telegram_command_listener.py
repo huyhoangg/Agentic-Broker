@@ -1,5 +1,5 @@
 """
-Telegram Interactive Command Listener with Real-Time Live Stream Process Manager
+Telegram Interactive Command Listener with Watchlist & Live Stream Process Manager
 """
 import os
 import time
@@ -9,6 +9,12 @@ from datetime import datetime
 from telegram_notifier import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, send_telegram_message
 from channel_manager import load_monitored_channels, add_channel, remove_channel
 from tiktok_profile_fetcher import fetch_tiktok_channel_profile
+from watchlist_manager import (
+    get_user_watchlist,
+    add_to_watchlist,
+    remove_from_watchlist,
+    get_recent_digest_for_watchlist
+)
 
 last_update_id = 0
 global_system_status = None
@@ -18,19 +24,111 @@ def process_telegram_command(command_text: str, chat_id: str):
 
     if text.startswith("/start") or text.startswith("/help"):
         help_msg = (
-            f"🤖 <b>ĐIỀU KHIỂN TRỢ LÝ BROKER TIKTOK LIVE</b>\n\n"
-            f"📌 <b>Các Lệnh Điều Khiển Có Thể Dùng:</b>\n\n"
-            f"🔹 <code>/recording</code> : Xem TIẾN TRÌNH thu âm trực tiếp (Realtime Progress)\n"
-            f"🔹 <code>/report</code> : Ép trích xuất BÁO CÁO bóc tách cổ phiếu tức thì\n"
-            f"🔹 <code>/stop</code> : DỪNG THU ÂM buổi Live hiện tại\n"
-            f"🔹 <code>/list</code> : Xem danh sách các kênh TikTok đang theo dõi\n"
-            f"🔹 <code>/add @ten_kenh</code> : Thêm kênh Broker mới (Ví dụ: <code>/add @chng.khon.cng.win</code>)\n"
-            f"🔹 <code>/remove @ten_kenh</code> : Xóa kênh khỏi danh sách theo dõi\n"
-            f"🔹 <code>/status</code> : Kiểm tra tổng quan hệ thống Robot\n\n"
-            f"<i>Bấm nút tương tác ngay bên dưới thông báo Live hoặc gõ lệnh bất kỳ lúc nào!</i>"
+            f"🤖 <b>ĐIỀU KHIỂN TRỢ LÝ BROKER TIKTOK LIVE & DANH MỤC</b>\n\n"
+            f"📌 <b>Quản Lý Danh Mục Mã Cổ Phiếu Quan Tâm:</b>\n"
+            f"🔹 <code>/watch CEO, SSI, HPG</code> : Thêm các mã cổ phiếu quan tâm vào Watchlist\n"
+            f"🔹 <code>/watchlist</code> : Xem danh sách mã cổ phiếu bạn đang theo dõi\n"
+            f"🔹 <code>/unwatch CEO</code> : Xóa mã cổ phiếu khỏi danh sách\n"
+            f"🔹 <code>/digest</code> : Tổng hợp báo cáo AI mới nhất cho các mã trong Watchlist\n\n"
+            f"📌 <b>Các Lệnh Giám Sát Livestream:</b>\n"
+            f"🔹 <code>/recording</code> : Xem tiến trình thu âm trực tiếp\n"
+            f"🔹 <code>/report</code> : Ép trích xuất báo cáo tức thì\n"
+            f"🔹 <code>/stop</code> : Dừng thu âm buổi Live hiện tại\n"
+            f"🔹 <code>/list</code> : Xem danh sách kênh TikTok đang theo dõi\n"
+            f"🔹 <code>/add @ten_kenh</code> : Thêm kênh TikTok mới\n"
+            f"🔹 <code>/remove @ten_kenh</code> : Xóa kênh TikTok\n"
+            f"🔹 <code>/status</code> : Kiểm tra tổng quan hệ thống\n"
         )
         send_telegram_message(help_msg)
 
+    # --- WATCHLIST MANAGEMENT COMMANDS ---
+    elif text.startswith("/watch") or text.startswith("/addstock"):
+        parts = text.split(maxsplit=1)
+        if len(parts) < 2:
+            send_telegram_message("⚠️ Vui lòng nhập mã cổ phiếu! Ví dụ: <code>/watch CEO, SSI, HPG</code>")
+            return
+
+        success, added, current_all = add_to_watchlist(chat_id, parts[1])
+        if success:
+            added_str = ", ".join([f"<b>{t}</b>" for t in added])
+            all_str = ", ".join([f"<code>{t}</code>" for t in current_all])
+            msg = (
+                f"✅ <b>ĐÃ THÊM MÃ CỔ PHIẾU VÀO WATCHLIST CỦA BẠN!</b>\n\n"
+                f"➕ Đã thêm: {added_str}\n"
+                f"📋 <b>Danh mục Watchlist hiện tại ({len(current_all)} mã):</b>\n"
+                f"{all_str}\n\n"
+                f"🛡️ <i>Dữ liệu đã được lưu an toàn xuống Supabase DB! Mỗi khi Broker nhắc tới các mã này, hệ thống sẽ tự động tổng hợp & báo về cho bạn!</i>"
+            )
+            send_telegram_message(msg)
+        else:
+            send_telegram_message("⚠️ Không tìm thấy mã cổ phiếu hợp lệ!")
+
+    elif text.startswith("/watchlist") or text.startswith("/myportfolio"):
+        watchlist = get_user_watchlist(chat_id)
+        if not watchlist:
+            send_telegram_message(
+                f"📋 <b>DANH MỤC WATCHLIST CỦA BẠN ĐANG TRỐNG</b>\n\n"
+                f"💡 Hãy thêm mã cổ phiếu quan tâm bằng lệnh: <code>/watch CEO, SSI, HPG</code>"
+            )
+            return
+
+        w_str = "\n".join([f"• <b>{t}</b>" for t in watchlist])
+        msg = (
+            f"📋 <b>DANH MỤC {len(watchlist)} MÃ CỔ PHIẾU ĐANG THEO DÕI:</b>\n\n"
+            f"{w_str}\n\n"
+            f"💡 Thêm mã mới: <code>/watch <mã></code> | Xóa mã: <code>/unwatch <mã></code>\n"
+            f"📊 Gõ <code>/digest</code> để xem tổng hợp phân tích AI mới nhất!"
+        )
+        send_telegram_message(msg)
+
+    elif text.startswith("/unwatch") or text.startswith("/delstock"):
+        parts = text.split(maxsplit=1)
+        if len(parts) < 2:
+            send_telegram_message("⚠️ Vui lòng nhập mã cổ phiếu muốn xóa! Ví dụ: <code>/unwatch CEO</code>")
+            return
+
+        success, removed, current_all = remove_from_watchlist(chat_id, parts[1])
+        rem_str = ", ".join([f"<b>{t}</b>" for t in removed])
+        all_str = ", ".join([f"<code>{t}</code>" for t in current_all]) if current_all else "<i>(Trống)</i>"
+
+        msg = (
+            f"🗑️ <b>ĐÃ XÓA MÃ CỔ PHIẾU KHỎI WATCHLIST!</b>\n\n"
+            f"➖ Đã xóa: {rem_str}\n"
+            f"📋 Danh mục còn lại: {all_str}"
+        )
+        send_telegram_message(msg)
+
+    elif text.startswith("/digest") or text.startswith("/summary") or text.startswith("/baocao"):
+        send_telegram_message("⏳ Đang tổng hợp dữ liệu phân tích AI mới nhất từ Supabase DB cho danh mục của bạn...")
+        reports = get_recent_digest_for_watchlist(chat_id, limit=6)
+
+        if not reports:
+            send_telegram_message(
+                f"📊 <b>CHƯA CÓ BÁO CÁO MỚI CHO DANH MỤC CỦA BẠN</b>\n\n"
+                f"Hệ thống chưa ghi nhận các buổi Live mới nhắc tới mã trong Watchlist của bạn.\n"
+                f"Dùng <code>/watchlist</code> để xem danh sách mã đang theo dõi!"
+            )
+            return
+
+        report_blocks = []
+        for r in reports:
+            tk = r.get("ticker", "")
+            ch = r.get("channel", "Broker")
+            sum_txt = r.get("summary", "")
+            t_str = r.get("created_at", "")[:16].replace("T", " ")
+            report_blocks.append(
+                f"📌 <b>MÃ {tk}</b> ({ch} - <code>{t_str}</code>):\n"
+                f"{sum_txt}\n"
+            )
+
+        full_msg = (
+            f"📊 <b>TỔNG HỢP BÁO CÁO PHÂN TÍCH AI (DÀNH CHO WATCHLIST CỦA BẠN)</b>\n\n"
+            + "\n--------------------\n".join(report_blocks) +
+            f"\n\n🛡️ <i>Dữ liệu được trích xuất từ Groq AI GPT-OSS-120B & lưu trữ tại Supabase Database.</i>"
+        )
+        send_telegram_message(full_msg)
+
+    # --- LIVESTREAM MONITORING COMMANDS ---
     elif text.startswith("/recording") or text.startswith("/progress"):
         if global_system_status and global_system_status.get("is_currently_recording"):
             ch = global_system_status.get("current_stream_channel", "@broker")
@@ -176,6 +274,7 @@ def process_telegram_command(command_text: str, chat_id: str):
             f"⚙️ Web Server: <b>Online 24/7 (Render + UptimeRobot)</b>\n"
             f"🎙️ Tiến trình Live: <b>{rec_status}</b>\n"
             f"⚡ Groq Cloud STT Engine: <b>Whisper-Large-V3 (Superfast 2s)</b>\n"
+            f"🧠 Groq LLM Engine: <b>GPT-OSS-120B (Finance Analyzer)</b>\n"
             f"☁️ Supabase Storage & DB: <b>Kết Nối OK</b>\n"
             f"📋 Số kênh theo dõi: <b>{len(channels)} kênh</b>"
         )
@@ -207,7 +306,6 @@ def start_telegram_command_poller(sys_status_ptr=None):
                         cb_data = cb.get("data", "")
                         chat_id = str(cb["message"]["chat"]["id"])
 
-                        # Trả lời Telegram API để tắt icon loading trên nút
                         try:
                             requests.post(
                                 f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/answerCallbackQuery",
