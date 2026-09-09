@@ -28,10 +28,10 @@ from groq_whisper import transcribe_with_cloud_whisper
 from supabase_client import upload_audio_to_supabase
 from channel_manager import load_monitored_channels
 from telegram_command_listener import start_telegram_command_poller
-from auto_migrate import auto_migrate_supabase
 
 # Trigger auto database table migrations on startup
 try:
+    from auto_migrate import auto_migrate_supabase
     auto_migrate_supabase()
 except Exception as e:
     print(f"ℹ️ Auto migration startup note: {e}")

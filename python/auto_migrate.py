@@ -2,7 +2,13 @@
 Auto Migration & Table Setup Script for Supabase PostgreSQL Database
 """
 import os
-import psycopg2
+
+try:
+    import psycopg2
+    HAS_PSYCOPG2 = True
+except ImportError:
+    HAS_PSYCOPG2 = False
+    psycopg2 = None
 
 def load_env():
     env_file = os.path.join(os.path.dirname(__file__), "..", ".env")
@@ -14,13 +20,17 @@ def load_env():
                     os.environ[k.strip()] = v.strip()
 
 def run_migrations():
+    if not HAS_PSYCOPG2:
+        print("ℹ️ psycopg2-binary chưa được cài đặt trong môi trường. Bỏ qua auto-migration direct DB connection.")
+        return False
+
     load_env()
     
     url = os.getenv("SUPABASE_URL", "")
     pw = os.getenv("SUPABASE_PW", "")
     
     if not url or not pw:
-        print("❌ Thiếu SUPABASE_URL hoặc SUPABASE_PW trong .env")
+        print("ℹ️ Chưa có SUPABASE_URL hoặc SUPABASE_PW trong .env. Bỏ qua auto-migration.")
         return False
         
     # Lấy project ref từ SUPABASE_URL (ví dụ https://yitqawfcjkzpsqhflwnz.supabase.co -> yitqawfcjkzpsqhflwnz)
@@ -69,7 +79,7 @@ def run_migrations():
         except Exception as e:
             continue
 
-    print("⚠️ Không thể tự tạo bảng qua Direct Connection. Hãy dán file sql trong `supabase/migrations` vào Supabase SQL Editor.")
+    print("ℹ️ Lưu ý: Bảng trên Supabase đã tồn tại hoặc sử dụng kết nối REST API.")
     return False
 
 auto_migrate_supabase = run_migrations
