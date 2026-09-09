@@ -212,6 +212,55 @@ def load_stock_kb() -> list:
 
     return DEFAULT_STOCK_KB
 
+def add_alias_to_ticker(ticker_name: str, new_alias: str) -> bool:
+    """
+    Thêm động 1 từ lóng / phát âm biến thể mới vào Supabase DB cho mã chứng khoán mà KHÔNG CẦN sửa code!
+    """
+    clean_ticker = ticker_name.strip().upper()
+    clean_alias = new_alias.strip().lower()
+    if not clean_ticker or not clean_alias:
+        return False
+
+    kb = load_stock_kb()
+    target_item = None
+    for item in kb:
+        if item["ticker"].upper() == clean_ticker:
+            target_item = item
+            break
+
+    if not target_item:
+        print(f"⚠️ Không tìm thấy mã {clean_ticker} trong Knowledge Base!")
+        return False
+
+    aliases = target_item.get("aliases", [])
+    if isinstance(aliases, str):
+        try:
+            aliases = json.loads(aliases)
+        except Exception:
+            aliases = []
+
+    if clean_alias not in [a.lower() for a in aliases]:
+        aliases.append(clean_alias)
+        target_item["aliases"] = aliases
+
+        if SUPABASE_URL and SUPABASE_KEY:
+            db_url = f"{SUPABASE_URL.rstrip('/')}/rest/v1/vn_stocks_kb?ticker=eq.{clean_ticker}"
+            headers = {
+                "Authorization": f"Bearer {SUPABASE_KEY}",
+                "apiKey": SUPABASE_KEY,
+                "Content-Type": "application/json",
+                "Prefer": "return=minimal"
+            }
+            try:
+                res = requests.patch(db_url, headers=headers, json={"aliases": aliases}, timeout=5)
+                if res.status_code in [200, 204]:
+                    print(f"✅ Đã thêm từ lóng mới '{clean_alias}' cho mã {clean_ticker} trên Supabase DB!")
+                    return True
+            except Exception as e:
+                print(f"⚠️ Lỗi cập nhật Supabase alias: {e}")
+
+    return False
+
 def normalize_and_extract_tickers(raw_transcript: str) -> list:
     """
     HÀM CHUẨN HÓA MÃ CHỨNG KHOÁN:
