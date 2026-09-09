@@ -1,6 +1,6 @@
 """
-Render Web Service + UptimeRobot 24/7 Seamless TikTok Live Audio Streamer
-Lightweight Cloud Architecture: Groq Cloud STT (No PyTorch/No Local Whisper needed!)
+Render Web Service + UptimeRobot 24/7 Multi-Channel Seamless TikTok Live Audio Streamer
+Interactive Control via Telegram Bot Commands (/add, /remove, /list, /status)
 """
 import os
 import sys
@@ -13,7 +13,6 @@ import json
 import shutil
 import imageio_ffmpeg
 
-# Resolve ffmpeg binary safely without symlink crashes
 system_ffmpeg = shutil.which("ffmpeg")
 if system_ffmpeg:
     resolved_ffmpeg = system_ffmpeg
@@ -25,9 +24,9 @@ from telegram_notifier import send_telegram_message
 from ticker_mapper import extract_vn_tickers
 from groq_whisper import transcribe_with_cloud_whisper
 from supabase_client import upload_audio_to_supabase
+from channel_manager import load_monitored_channels
+from telegram_command_listener import start_telegram_command_poller
 
-# Configuration
-TARGET_TIKTOK_CHANNEL = os.getenv("TIKTOK_CHANNEL", "@vtv24")
 CHECK_INTERVAL_SEC = int(os.getenv("CHECK_INTERVAL", "120"))
 RECORDINGS_DIR = os.getenv("RECORDINGS_DIR", "recordings")
 PORT = int(os.getenv("PORT", "10000"))
@@ -38,13 +37,15 @@ system_status = {
     "is_currently_recording": False,
     "current_stream_channel": None,
     "total_recorded_lives": 0,
-    "stt_engine": "Groq Cloud Whisper-Large-V3 (Superfast & Ultra-lightweight)"
+    "stt_engine": "Groq Cloud Whisper-Large-V3"
 }
 
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         system_status["last_ping_time"] = datetime.now().strftime("%H:%M:%S %d/%m/%Y")
-        
+        channels = load_monitored_channels()
+        system_status["monitored_channels"] = channels
+
         self.send_response(200)
         self.send_header("Content-type", "application/json; charset=utf-8")
         self.end_headers()
@@ -122,14 +123,17 @@ def run_seamless_recording(stream_url: str, channel: str):
         system_status["current_stream_channel"] = None
 
 def background_tiktok_monitor_thread():
-    print(f"🤖 [Background Monitor Started] Đang giám sát kênh {TARGET_TIKTOK_CHANNEL}...")
+    channels = load_monitored_channels()
+    print(f"🤖 [Multi-Channel Monitor Started] Đang giám sát {len(channels)} kênh: {channels}")
 
     send_telegram_message(
-        f"🚀 <b>TIKTOK LIVE BROKER ASSISTANT ONLINE 24/7</b>\n\n"
-        f"🎯 Kênh theo dõi: <b>{TARGET_TIKTOK_CHANNEL}</b>\n"
-        f"⚡ Groq Cloud STT Engine: <b>ON (Siêu siêu nhẹ)</b>\n"
-        f"☁️ Kho lưu trữ: <b>Supabase Storage & DB</b>\n"
-        f"🟢 Render + UptimeRobot sẵn sàng thu âm liền mạch 100%!"
+        f"🚀 <b>MULTI-CHANNEL BROKER ASSISTANT ONLINE 24/7</b>\n\n"
+        f"📋 Đang giám sát <b>{len(channels)} kênh TikTok Broker</b>:\n"
+        f"<i>{', '.join(channels)}</i>\n\n"
+        f"💡 Bạn có thể dùng các lệnh Telegram để điều khiển:\n"
+        f"• <code>/list</code> : Xem danh sách kênh\n"
+        f"• <code>/add @ten_kenh</code> : Thêm kênh mới\n"
+        f"• <code>/remove @ten_kenh</code> : Xóa kênh"
     )
 
     while True:
@@ -138,14 +142,18 @@ def background_tiktok_monitor_thread():
             system_status["last_check_time"] = now_str
             
             if not system_status["is_currently_recording"]:
-                print(f"[🔍 {now_str}] Kiểm tra luồng Live {TARGET_TIKTOK_CHANNEL}...")
-                stream_url = get_tiktok_live_audio_stream_url(TARGET_TIKTOK_CHANNEL)
+                current_channels = load_monitored_channels()
+                for target_ch in current_channels:
+                    print(f"[🔍 {now_str}] Quét luồng Live kênh {target_ch}...")
+                    stream_url = get_tiktok_live_audio_stream_url(target_ch)
 
-                if stream_url:
-                    run_seamless_recording(stream_url, TARGET_TIKTOK_CHANNEL)
-                    time.sleep(30)
-                else:
-                    time.sleep(CHECK_INTERVAL_SEC)
+                    if stream_url:
+                        run_seamless_recording(stream_url, target_ch)
+                        break
+                    
+                    time.sleep(2)
+                
+                time.sleep(CHECK_INTERVAL_SEC)
             else:
                 time.sleep(30)
 
@@ -154,12 +162,18 @@ def background_tiktok_monitor_thread():
             time.sleep(30)
 
 def start_server():
+    # Start Telegram Command Listener Thread
+    cmd_thread = threading.Thread(target=start_telegram_command_poller, daemon=True)
+    cmd_thread.start()
+
+    # Start TikTok Multi-Channel Monitor Thread
     monitor_thread = threading.Thread(target=background_tiktok_monitor_thread, daemon=True)
     monitor_thread.start()
 
+    # Start HTTP Health Check Web Server
     server_address = ('0.0.0.0', PORT)
     httpd = HTTPServer(server_address, HealthCheckHandler)
-    print(f"🌐 Server listening on 0.0.0.0:{PORT}...")
+    print(f"🌐 Multi-Channel Web Server listening on 0.0.0.0:{PORT}...")
     httpd.serve_forever()
 
 if __name__ == "__main__":
