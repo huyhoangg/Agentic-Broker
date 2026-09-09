@@ -1,4 +1,4 @@
-# Dockerfile cho Render Background Worker (TikTok Live Audio Record & AI Speech-to-Text)
+# Dockerfile cho Render Web Service 24/7 (TikTok Seamless Live Audio Streamer + UptimeRobot Keep-Alive)
 FROM python:3.11-slim
 
 # Cài đặt ffmpeg và các công cụ hệ thống
@@ -12,7 +12,6 @@ WORKDIR /app
 
 # Copy dependency files
 COPY package*.json ./
-COPY python/requirements.txt ./python/
 
 # Cài đặt Python requirements
 RUN pip install --no-cache-dir --upgrade pip
@@ -21,5 +20,7 @@ RUN pip install --no-cache-dir yt-dlp openai-whisper imageio-ffmpeg soundfile re
 # Copy toàn bộ code vào container
 COPY . .
 
-# Chạy Background Worker ngầm 24/7
-CMD ["python", "python/render_worker.py"]
+EXPOSE 10000
+
+# Chạy Web Server + Background Monitor Thread
+CMD ["python", "python/server.py"]
