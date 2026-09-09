@@ -3,6 +3,7 @@ Groq API / Cloud STT Helper - Superfast 100% Free Whisper Cloud STT
 Uses Groq Whisper-Large-V3 (Translates 1 hour of audio in 2 seconds, 100% Free Tier, Zero RAM footprint on Render!)
 """
 import os
+import re
 import requests
 
 # Auto-load .env file
@@ -13,6 +14,19 @@ if os.path.exists(env_file):
             if "=" in line and not line.startswith("#"):
                 k, v = line.strip().split("=", 1)
                 os.environ[k.strip()] = v.strip()
+
+def clean_hallucinated_text(raw_text: str) -> str:
+    """
+    Làm sạch các đoạn ký tự rác lặp lại do Whisper sinh ra khi gặp nhạc nền hoặc nhiễu âm thanh
+    """
+    if not raw_text:
+        return ""
+    
+    # Loại bỏ chuỗi ký tự đơn/đôi vô nghĩa nối tiếp nhau (e.g. "th n c nh mua ng h nay l")
+    cleaned = re.sub(r'(?:\b[a-zA-Z]{1,2}\s+){3,}[a-zA-Z]{1,2}\b', '', raw_text)
+    # Loại bỏ khoảng trắng thừa
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    return cleaned
 
 def transcribe_with_cloud_whisper(audio_filepath: str, prompt_hint="Chứng khoán Việt Nam, HCM, HPG, SSI, DIG, stop loss, break"):
     """
@@ -38,6 +52,7 @@ def transcribe_with_cloud_whisper(audio_filepath: str, prompt_hint="Chứng kho�
                 data = {
                     "model": "whisper-large-v3-turbo",
                     "language": "vi",
+                    "temperature": 0.0,
                     "prompt": prompt_hint,
                     "response_format": "verbose_json"
                 }
@@ -45,7 +60,8 @@ def transcribe_with_cloud_whisper(audio_filepath: str, prompt_hint="Chứng kho�
                 if res.status_code == 200:
                     json_resp = res.json()
                     print("⚡ [Groq Whisper Cloud STT Success] Đã dịch âm thanh cực nhanh từ Cloud!")
-                    return json_resp.get("text", "")
+                    raw_txt = json_resp.get("text", "")
+                    return clean_hallucinated_text(raw_txt)
                 else:
                     print(f"⚠️ Groq API Error ({res.status_code}): {res.text}")
                     if attempt < 3:
