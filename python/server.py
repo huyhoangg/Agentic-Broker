@@ -10,15 +10,27 @@ import subprocess
 from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import json
+import shutil
 
-# Ensure bin directory with ffmpeg is in PATH
+# Ensure ffmpeg binary path is resolved safely without FileExistsError
 import imageio_ffmpeg
+
 bin_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "bin"))
 ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
 symlink_path = os.path.join(bin_dir, "ffmpeg")
-if not os.path.exists(symlink_path):
-    os.makedirs(bin_dir, exist_ok=True)
-    os.symlink(ffmpeg_exe, symlink_path)
+
+# Check if system ffmpeg exists (e.g. /usr/bin/ffmpeg from apt-get)
+system_ffmpeg = shutil.which("ffmpeg")
+if system_ffmpeg:
+    resolved_ffmpeg = system_ffmpeg
+else:
+    resolved_ffmpeg = symlink_path
+    if not os.path.exists(symlink_path) and not os.path.islink(symlink_path):
+        os.makedirs(bin_dir, exist_ok=True)
+        try:
+            os.symlink(ffmpeg_exe, symlink_path)
+        except FileExistsError:
+            pass
 
 os.environ["PATH"] = bin_dir + os.path.pathsep + os.environ.get("PATH", "")
 
@@ -31,7 +43,7 @@ from groq_whisper import transcribe_with_cloud_whisper
 TARGET_TIKTOK_CHANNEL = os.getenv("TIKTOK_CHANNEL", "@vtv24")
 CHECK_INTERVAL_SEC = int(os.getenv("CHECK_INTERVAL", "120"))  # Check every 2 mins
 RECORDINGS_DIR = os.getenv("RECORDINGS_DIR", "recordings")
-PORT = int(os.getenv("PORT", 10000))
+PORT = int(os.getenv("PORT", "10000"))
 
 # Global Monitor State
 system_status = {
@@ -65,9 +77,6 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         return  # Suppress noisy HTTP logs
 
 def run_seamless_recording(stream_url: str, channel: str):
-    """
-    Chạy ffmpeg thu âm liền mạch (chỉ tốn ~25MB RAM / ~2% CPU)
-    """
     os.makedirs(RECORDINGS_DIR, exist_ok=True)
     timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
     clean_channel = channel.replace("@", "")
@@ -88,7 +97,7 @@ def run_seamless_recording(stream_url: str, channel: str):
     )
 
     cmd = [
-        symlink_path,
+        resolved_ffmpeg,
         "-i", stream_url,
         "-vn",
         "-acodec", "libmp3lame",
@@ -159,9 +168,9 @@ def start_server():
     monitor_thread = threading.Thread(target=background_tiktok_monitor_thread, daemon=True)
     monitor_thread.start()
 
-    server_address = ('', PORT)
+    server_address = ('0.0.0.0', PORT)
     httpd = HTTPServer(server_address, HealthCheckHandler)
-    print(f"🌐 Render Web Server listening on port {PORT}...")
+    print(f"🌐 Render Web Server listening on 0.0.0.0:{PORT}...")
     httpd.serve_forever()
 
 if __name__ == "__main__":

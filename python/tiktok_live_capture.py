@@ -8,12 +8,22 @@ import time
 import imageio_ffmpeg
 
 # Ensure ffmpeg binary is in PATH
+import shutil
 bin_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "bin"))
 ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
 symlink_path = os.path.join(bin_dir, "ffmpeg")
-if not os.path.exists(symlink_path):
-    os.makedirs(bin_dir, exist_ok=True)
-    os.symlink(ffmpeg_exe, symlink_path)
+
+system_ffmpeg = shutil.which("ffmpeg")
+if system_ffmpeg:
+    ffmpeg_binary = system_ffmpeg
+else:
+    ffmpeg_binary = symlink_path
+    if not os.path.exists(symlink_path) and not os.path.islink(symlink_path):
+        os.makedirs(bin_dir, exist_ok=True)
+        try:
+            os.symlink(ffmpeg_exe, symlink_path)
+        except FileExistsError:
+            pass
 
 os.environ["PATH"] = bin_dir + os.path.pathsep + os.environ.get("PATH", "")
 
