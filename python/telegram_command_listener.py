@@ -1,15 +1,17 @@
 """
-Telegram Interactive Command Listener with TikTok Profile Details
+Telegram Interactive Command Listener with Real-Time Recording Progress Tracker
 """
 import os
 import time
 import requests
 import threading
+from datetime import datetime
 from telegram_notifier import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, send_telegram_message
 from channel_manager import load_monitored_channels, add_channel, remove_channel
 from tiktok_profile_fetcher import fetch_tiktok_channel_profile
 
 last_update_id = 0
+global_system_status = None
 
 def process_telegram_command(command_text: str, chat_id: str):
     text = command_text.strip()
@@ -18,13 +20,47 @@ def process_telegram_command(command_text: str, chat_id: str):
         help_msg = (
             f"🤖 <b>ĐIỀU KHIỂN TRỢ LÝ BROKER TIKTOK LIVE</b>\n\n"
             f"📌 <b>Các Lệnh Điều Khiển Có Thể Dùng:</b>\n\n"
+            f"🔹 <code>/recording</code> : Xem TIẾN TRÌNH thu âm trực tiếp (Realtime Progress)\n"
             f"🔹 <code>/list</code> : Xem danh sách các kênh TikTok đang theo dõi\n"
             f"🔹 <code>/add @ten_kenh</code> : Thêm kênh Broker mới (Ví dụ: <code>/add @chng.khon.cng.win</code>)\n"
             f"🔹 <code>/remove @ten_kenh</code> : Xóa kênh khỏi danh sách theo dõi\n"
-            f"🔹 <code>/status</code> : Kiểm tra trạng thái hệ thống Robot\n\n"
-            f"<i>Gõ <code>/add @chng.khon.cng.win</code> để thử ngay!</i>"
+            f"🔹 <code>/status</code> : Kiểm tra tổng quan hệ thống Robot\n\n"
+            f"<i>Gõ <code>/recording</code> để xem tiến trình thu âm!</i>"
         )
         send_telegram_message(help_msg)
+
+    elif text.startswith("/recording") or text.startswith("/progress"):
+        if global_system_status and global_system_status.get("is_currently_recording"):
+            ch = global_system_status.get("current_stream_channel", "@broker")
+            start_dt = global_system_status.get("recording_start_time")
+            fpath = global_system_status.get("current_filepath")
+            
+            elapsed_sec = int((datetime.now() - start_dt).total_seconds()) if start_dt else 0
+            mins = elapsed_sec // 60
+            secs = elapsed_sec % 60
+            
+            size_mb = "N/A"
+            if fpath and os.path.exists(fpath):
+                size_mb = f"{round(os.path.getsize(fpath) / (1024 * 1024), 2)} MB"
+
+            msg = (
+                f"🔴 <b>TIẾN TRÌNH THU ÂM LIVESTREAM TRỰC TIẾP</b>\n\n"
+                f"👤 Broker: <b>{ch}</b>\n"
+                f"⏰ Bắt đầu lúc: <code>{start_dt.strftime('%H:%M:%S %d/%m/%Y') if start_dt else 'N/A'}</code>\n"
+                f"⏱️ Đã thu được: <b>{mins} phút {secs} giây</b>\n"
+                f"💾 Dung lượng MP3 tạm thời: <b>{size_mb}</b>\n"
+                f"🟢 Trạng thái: <b>Đang ghi âm 100% liền mạch...</b>\n\n"
+                f"<i>File MP3 đầy đủ sẽ tự động được tải lên Supabase ngay khi Broker tắt Live!</i>"
+            )
+        else:
+            channels = load_monitored_channels()
+            msg = (
+                f"💤 <b>HIỆN TẠI KHÔNG CÓ BUỔI LIVE NÀO ĐANG DIỄN RA</b>\n\n"
+                f"📋 Robot đang ngầm giám sát <b>{len(channels)} kênh Broker</b>:\n"
+                f"<i>{', '.join(channels) if channels else 'Chưa có kênh nào'}</i>\n\n"
+                f"🟢 Ngay khi có Broker bật Live, hệ thống sẽ tự động nhắn tin cho bạn!"
+            )
+        send_telegram_message(msg)
 
     elif text.startswith("/list"):
         channels = load_monitored_channels()
@@ -49,13 +85,10 @@ def process_telegram_command(command_text: str, chat_id: str):
         target = parts[1].strip()
         send_telegram_message(f"⏳ Đang đọc thông tin chi tiết kênh <b>{target}</b> từ TikTok...")
 
-        # 1. Fetch channel metadata (Display name & Live status)
         profile_info = fetch_tiktok_channel_profile(target)
-        
-        # 2. Add channel to DB
         success, clean_name, updated_list = add_channel(target)
 
-        live_status_str = "🔴 <b>ĐANG LIVESTREAM NÓNG!</b>" if profile_info["is_live"] else "💤 Hiện chưa bật Live (Offline)"
+        live_status_str = "🔴 <b>ĐANG LIVESTREAM NÓNG!</b> (Đang mở luồng thu âm...)" if profile_info["is_live"] else "💤 Hiện chưa bật Live (Offline)"
 
         if success:
             card_msg = (
@@ -64,7 +97,8 @@ def process_telegram_command(command_text: str, chat_id: str):
                 f"🆔 <b>Username:</b> <code>{profile_info['username']}</code>\n"
                 f"📊 <b>Trạng thái Live:</b> {live_status_str}\n"
                 f"🔗 <b>Link TikTok:</b> <a href=\"{profile_info['profile_url']}\">Xem kênh</a>\n\n"
-                f"📋 Tổng số kênh đang giám sát 24/7: <b>{len(updated_list)}</b> kênh."
+                f"📋 Tổng số kênh đang giám sát 24/7: <b>{len(updated_list)}</b> kênh.\n"
+                f"💡 Gõ <code>/recording</code> để xem tiến trình thu âm!"
             )
             send_telegram_message(card_msg)
         else:
@@ -95,17 +129,24 @@ def process_telegram_command(command_text: str, chat_id: str):
 
     elif text.startswith("/status"):
         channels = load_monitored_channels()
+        is_rec = global_system_status.get("is_currently_recording") if global_system_status else False
+        rec_status = f"🔴 ĐANG THU ÂM KÊNH {global_system_status.get('current_stream_channel')}" if is_rec else "💤 Sẵn sàng giám sát 24/7"
+
         msg = (
             f"🟢 <b>TRẠNG THÁI HỆ THỐNG ROBOT BROKER</b>\n\n"
             f"⚙️ Web Server: <b>Online 24/7 (Render + UptimeRobot)</b>\n"
+            f"🎙️ Tiến trình Live: <b>{rec_status}</b>\n"
             f"⚡ Groq Cloud STT Engine: <b>Whisper-Large-V3 (Superfast 2s)</b>\n"
             f"☁️ Supabase Storage & DB: <b>Kết Nối OK</b>\n"
-            f"📋 Số kênh theo dõi: <b>{len(channels)} kênh</b> ({', '.join(channels[:3])}...)"
+            f"📋 Số kênh theo dõi: <b>{len(channels)} kênh</b>"
         )
         send_telegram_message(msg)
 
-def start_telegram_command_poller():
-    global last_update_id
+def start_telegram_command_poller(sys_status_ptr=None):
+    global last_update_id, global_system_status
+    if sys_status_ptr:
+        global_system_status = sys_status_ptr
+
     if not TELEGRAM_BOT_TOKEN:
         return
 

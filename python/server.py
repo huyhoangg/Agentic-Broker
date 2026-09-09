@@ -1,6 +1,6 @@
 """
 Render Web Service + UptimeRobot 24/7 Multi-Channel Seamless TikTok Live Audio Streamer
-Database-backed Monitored Channels (Supabase DB & Telegram Commands)
+Real-time Recording Progress Tracking & Supabase Integration
 """
 import os
 import sys
@@ -36,6 +36,8 @@ system_status = {
     "last_check_time": None,
     "is_currently_recording": False,
     "current_stream_channel": None,
+    "recording_start_time": None,
+    "current_filepath": None,
     "total_recorded_lives": 0,
     "stt_engine": "Groq Cloud Whisper-Large-V3"
 }
@@ -45,6 +47,17 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         system_status["last_ping_time"] = datetime.now().strftime("%H:%M:%S %d/%m/%Y")
         channels = load_monitored_channels()
         system_status["monitored_channels"] = channels
+
+        if system_status["is_currently_recording"] and system_status.get("recording_start_time"):
+            start_t = system_status["recording_start_time"]
+            elapsed = int((datetime.now() - start_t).total_seconds())
+            system_status["elapsed_seconds"] = elapsed
+            system_status["elapsed_str"] = f"{elapsed // 60} phút {elapsed % 60} giây"
+            
+            fpath = system_status.get("current_filepath")
+            if fpath and os.path.exists(fpath):
+                size_bytes = os.path.getsize(fpath)
+                system_status["file_size_mb"] = round(size_bytes / (1024 * 1024), 2)
 
         self.send_response(200)
         self.send_header("Content-type", "application/json; charset=utf-8")
@@ -62,22 +75,25 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
 
 def run_seamless_recording(stream_url: str, channel: str):
     os.makedirs(RECORDINGS_DIR, exist_ok=True)
-    timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+    start_dt = datetime.now()
+    timestamp_str = start_dt.strftime("%Y%m%d_%H%M%S")
     clean_channel = channel.replace("@", "")
     filename = f"seamless_broker_{clean_channel}_{timestamp_str}.mp3"
     filepath = os.path.join(RECORDINGS_DIR, filename)
 
     system_status["is_currently_recording"] = True
     system_status["current_stream_channel"] = channel
+    system_status["recording_start_time"] = start_dt
+    system_status["current_filepath"] = filepath
 
     print(f"\n🔴 [SEAMLESS RECORDING STARTED] Kênh {channel} đang Live!")
     print(f"📁 Lưu trực tiếp luồng audio vào: {filepath}")
 
     send_telegram_message(
-        f"🔴 <b>BẮT ĐẦU THU ÂM LIỀN MẠCH (SEAMLESS STREAM)</b>\n\n"
+        f"🔴 <b>PHÁT HIỆN LIVE: BẮT ĐẦU THU ÂM!</b>\n\n"
         f"👤 Broker: <b>{channel}</b>\n"
-        f"⏰ Bắt đầu: <code>{datetime.now().strftime('%H:%M:%S %d/%m/%Y')}</code>\n"
-        f"🎙️ Luồng audio đang được thu âm 100% liền mạch..."
+        f"⏰ Bắt đầu lúc: <code>{start_dt.strftime('%H:%M:%S %d/%m/%Y')}</code>\n"
+        f"🎙️ Luồng audio đang được thu âm liền mạch 100%..."
     )
 
     cmd = [
@@ -92,8 +108,15 @@ def run_seamless_recording(stream_url: str, channel: str):
 
     try:
         proc = subprocess.Popen(cmd)
-        proc.wait()
         
+        # Periodic progress logger while recording
+        while proc.poll() is None:
+            time.sleep(30)
+            if os.path.exists(filepath):
+                sz_mb = round(os.path.getsize(filepath) / (1024 * 1024), 2)
+                el_min = int((datetime.now() - start_dt).total_seconds() // 60)
+                print(f"🎙️ [Recording Progress] {channel} | Thời gian: {el_min} phút | Dung lượng: {sz_mb} MB")
+
         system_status["total_recorded_lives"] += 1
         print(f"✅ Buổi Live hoàn thành! File ghi âm: {filepath}")
 
@@ -121,19 +144,18 @@ def run_seamless_recording(stream_url: str, channel: str):
     finally:
         system_status["is_currently_recording"] = False
         system_status["current_stream_channel"] = None
+        system_status["recording_start_time"] = None
+        system_status["current_filepath"] = None
 
 def background_tiktok_monitor_thread():
     channels = load_monitored_channels()
     print(f"🤖 [Multi-Channel Monitor Started] Đang giám sát {len(channels)} kênh từ DB/Storage: {channels}")
 
     send_telegram_message(
-        f"🚀 <b>DATABASE-BACKED BROKER ASSISTANT ONLINE 24/7</b>\n\n"
-        f"📋 Đang giám sát <b>{len(channels)} kênh TikTok</b> trong Supabase DB:\n"
+        f"🚀 <b>BROKER ASSISTANT ONLINE 24/7 ON RENDER</b>\n\n"
+        f"📋 Đang giám sát <b>{len(channels)} kênh TikTok</b>:\n"
         f"<i>{', '.join(channels) if channels else 'Chưa có kênh nào. Dùng /add @ten_kenh để thêm!'}</i>\n\n"
-        f"💡 Bạn có thể dùng các lệnh Telegram để điều khiển:\n"
-        f"• <code>/list</code> : Xem danh sách kênh\n"
-        f"• <code>/add @ten_kenh</code> : Thêm kênh mới vào DB\n"
-        f"• <code>/remove @ten_kenh</code> : Xóa kênh khỏi DB"
+        f"💡 Bạn có thể kiểm tra tiến trình bằng lệnh: <code>/recording</code> hoặc <code>/status</code>"
     )
 
     while True:
@@ -165,15 +187,13 @@ def background_tiktok_monitor_thread():
             time.sleep(30)
 
 def start_server():
-    # Start Telegram Command Listener Thread
-    cmd_thread = threading.Thread(target=start_telegram_command_poller, daemon=True)
+    # Pass system_status pointer reference for command listener
+    cmd_thread = threading.Thread(target=start_telegram_command_poller, args=(system_status,), daemon=True)
     cmd_thread.start()
 
-    # Start TikTok Multi-Channel Monitor Thread
     monitor_thread = threading.Thread(target=background_tiktok_monitor_thread, daemon=True)
     monitor_thread.start()
 
-    # Start HTTP Health Check Web Server
     server_address = ('0.0.0.0', PORT)
     httpd = HTTPServer(server_address, HealthCheckHandler)
     print(f"🌐 Server listening on 0.0.0.0:{PORT}...")

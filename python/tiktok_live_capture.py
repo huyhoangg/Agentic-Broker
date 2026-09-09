@@ -23,25 +23,31 @@ def get_tiktok_live_audio_stream_url(tiktok_username: str) -> str:
     
     print(f"[+] Đang kết nối tới TikTok Live: {tiktok_url}")
     
-    cmd = [
-        "yt-dlp",
-        "-g",
-        "-f", "b[ext=mp4]/best",
-        tiktok_url
-    ]
-    
+    # Try 1: yt-dlp -g
+    cmd1 = ["yt-dlp", "-g", tiktok_url]
     try:
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        res = subprocess.run(cmd1, capture_output=True, text=True, timeout=15)
         if res.returncode == 0 and res.stdout.strip():
-            stream_url = res.stdout.strip().split("\n")[0]
-            print(f"✅ Đã lấy thành công luồng Stream HLS của @{clean_username}")
-            return stream_url
-        else:
-            print(f"⚠️ Chưa phát hiện luồng Live (Kênh có thể đang tắt): {res.stderr[:100]}")
-            return None
+            urls = [u for u in res.stdout.strip().split("\n") if u.startswith("http")]
+            if urls:
+                print(f"✅ Đã lấy thành công luồng Stream HLS của @{clean_username}")
+                return urls[0]
     except Exception as e:
-        print(f"❌ Lỗi khi quét stream URL: {e}")
-        return None
+        print(f"⚠️ Try 1 error: {e}")
+
+    # Try 2: yt-dlp -g -f best
+    cmd2 = ["yt-dlp", "-g", "-f", "best/b", tiktok_url]
+    try:
+        res2 = subprocess.run(cmd2, capture_output=True, text=True, timeout=15)
+        if res2.returncode == 0 and res2.stdout.strip():
+            urls = [u for u in res2.stdout.strip().split("\n") if u.startswith("http")]
+            if urls:
+                print(f"✅ (Try 2) Đã lấy thành công luồng Stream HLS của @{clean_username}")
+                return urls[0]
+    except Exception as e:
+        print(f"⚠️ Try 2 error: {e}")
+
+    return None
 
 def capture_stream_audio_chunks(stream_url: str, output_dir="chunks", chunk_sec=10):
     os.makedirs(output_dir, exist_ok=True)
@@ -66,7 +72,7 @@ def capture_stream_audio_chunks(stream_url: str, output_dir="chunks", chunk_sec=
     return process
 
 if __name__ == "__main__":
-    target = sys.argv[1] if len(sys.argv) > 1 else "@vtv24"
+    target = sys.argv[1] if len(sys.argv) > 1 else "@chng.khon.cng.win"
     url = get_tiktok_live_audio_stream_url(target)
     if url:
         print(f"Direct Stream URL: {url[:100]}...")
