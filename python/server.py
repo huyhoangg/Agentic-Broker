@@ -83,6 +83,7 @@ def run_bulletproof_recording(stream_url: str, channel: str):
     Cơ chế thu âm phân đoạn 5 phút (Segmented Recording):
     Cứ 5 phút âm thanh trôi qua -> Tự động upload ngay segment đó lên Supabase!
     Giúp bảo vệ 100% dữ liệu dù Render có bị restart hay sập nguồn.
+    Có tích hợp Quản lý tiến trình trực tiếp qua Telegram (Nút bấm & Lệnh /recording, /report, /stop).
     """
     os.makedirs(RECORDINGS_DIR, exist_ok=True)
     start_dt = datetime.now()
@@ -98,15 +99,37 @@ def run_bulletproof_recording(stream_url: str, channel: str):
     system_status["current_stream_channel"] = channel
     system_status["recording_start_time"] = start_dt
     system_status["uploaded_parts"] = 0
+    system_status["stop_requested"] = False
+    system_status["report_requested"] = False
+    system_status["current_filepath"] = os.path.join(session_dir, "part_000.mp3")
 
-    print(f"\n🔴 [BULLETPROOF RECORDING STARTED] Kênh {channel} đang Live!")
+    # Lấy thông tin kênh từ TikTok OEmbed API
+    profile = fetch_tiktok_channel_profile(channel)
+
+    print(f"\n🔴 [BULLETPROOF RECORDING STARTED] Kênh {profile['display_name']} ({channel}) đang Live!")
     print(f"📁 Phân đoạn 5 phút lưu tại: {session_dir}")
 
+    # Nút bấm tương tác trực tiếp trên Telegram
+    interactive_buttons = {
+        "inline_keyboard": [
+            [
+                {"text": "📊 Xem tiến trình", "callback_data": "/recording"},
+                {"text": "📝 Báo cáo ngay", "callback_data": "/report"}
+            ],
+            [
+                {"text": "🛑 Dừng thu âm", "callback_data": "/stop"}
+            ]
+        ]
+    }
+
     send_telegram_message(
-        f"🔴 <b>PHÁT HIỆN LIVE: BẮT ĐẦU THU ÂM AN TOÀN (BULLETPROOF)</b>\n\n"
-        f"👤 Broker: <b>{channel}</b>\n"
+        f"🔴 <b>PHÁT HIỆN TIKTOK LIVE MỚI: BẮT ĐẦU THU ÂM AN TOÀN!</b>\n\n"
+        f"👤 Broker: <b>{profile['display_name']}</b> (<code>{channel}</code>)\n"
         f"⏰ Bắt đầu lúc: <code>{start_dt.strftime('%H:%M:%S %d/%m/%Y')}</code>\n"
-        f"🛡️ <i>Cơ chế tự động lưu Supabase 5 phút/lần chống mất dữ liệu khi rớt mạng!</i>"
+        f"🔗 Xem kênh: <a href=\"{profile['profile_url']}\">TikTok Profile</a>\n"
+        f"🛡️ <i>Tự động sao lưu Supabase 5 phút/lần chống mất dữ liệu khi rớt mạng!</i>\n\n"
+        f"👇 <b>Bấm nút bên dưới để điều khiển tiến trình thu âm:</b>",
+        reply_markup=interactive_buttons
     )
 
     # ffmpeg command creating 300-second (5-min) MP3 segments
@@ -129,29 +152,59 @@ def run_bulletproof_recording(stream_url: str, channel: str):
         
         # Monitor & sync new 5-minute MP3 segments to Supabase while recording
         while proc.poll() is None:
-            time.sleep(15)
-            mp3_files = sorted(glob.glob(os.path.join(session_dir, "part_*.mp3")))
-            
-            # If more than 1 file exists, the earlier ones are completed segments!
-            for seg_file in mp3_files[:-1]:
-                if seg_file not in uploaded_files:
-                    uploaded_files.add(seg_file)
-                    part_num = len(uploaded_files)
-                    system_status["uploaded_parts"] = part_num
-                    print(f"☁️ [Auto-Sync Supabase] Đang backup Part #{part_num} lên Supabase...")
-                    
-                    sub_url = upload_audio_to_supabase(seg_file, channel)
-                    raw_text = transcribe_with_cloud_whisper(seg_file)
-                    detected_tickers = extract_vn_tickers(raw_text) if raw_text else []
-                    ticker_str = ", ".join([t["ticker"] for t in detected_tickers]) if detected_tickers else "Theo dõi"
+            time.sleep(5)
 
+            # 1. Kiểm tra Lệnh DỪNG từ Telegram (/stop)
+            if system_status.get("stop_requested"):
+                print("🛑 Đang dừng buổi thu âm theo yêu cầu từ Telegram...")
+                system_status["stop_requested"] = False
+                proc.terminate()
+                time.sleep(2)
+                if proc.poll() is None:
+                    proc.kill()
+                break
+
+            # 2. Kiểm tra Lệnh BÁO CÁO TỨC THÌ từ Telegram (/report)
+            if system_status.get("report_requested"):
+                system_status["report_requested"] = False
+                print("⚡ Đang tạo báo cáo trích xuất tức thì theo yêu cầu từ Telegram...")
+                mp3_files = sorted(glob.glob(os.path.join(session_dir, "part_*.mp3")))
+                if mp3_files:
+                    latest_file = mp3_files[-1]
+                    raw_text = transcribe_with_cloud_whisper(latest_file)
+                    detected_tickers = extract_vn_tickers(raw_text) if raw_text else []
+                    ticker_str = ", ".join([t["ticker"] for t in detected_tickers]) if detected_tickers else "Chưa phát hiện mã"
+                    
                     send_telegram_message(
-                        f"🛡️ <b>ĐÃ BACKUP THÀNH CÔNG PART #{part_num} LÊN SUPABASE</b>\n\n"
-                        f"👤 Broker: <b>{channel}</b>\n"
-                        f"⏱️ Thời lượng segment: <b>5 phút</b>\n"
-                        f"🏷️ Mã phát hiện: <b>{ticker_str}</b>\n"
-                        f"🔗 Link Supabase: {sub_url if sub_url else 'Đã lưu'}"
+                        f"📝 <b>BÁO CÁO TRÍCH XUẤT TỨC THÌ (REALTIME REPORT)</b>\n\n"
+                        f"👤 Broker: <b>{profile['display_name']}</b> ({channel})\n"
+                        f"⏱️ Thời điểm trích xuất: <code>{datetime.now().strftime('%H:%M:%S %d/%m/%Y')}</code>\n"
+                        f"🏷️ <b>Mã cổ phiếu phát hiện:</b> <b>{ticker_str}</b>\n\n"
+                        f"🗣️ <b>Nội dung trích đoạn:</b>\n<i>\"{raw_text[:400]}...\"</i>" if raw_text else "<i>(Chưa có âm thanh)</i>"
                     )
+
+            # 3. Auto-sync các phân đoạn 5 phút đã hoàn thành lên Supabase
+            mp3_files = sorted(glob.glob(os.path.join(session_dir, "part_*.mp3")))
+            if len(mp3_files) > 1:
+                for seg_file in mp3_files[:-1]:
+                    if seg_file not in uploaded_files:
+                        uploaded_files.add(seg_file)
+                        part_num = len(uploaded_files)
+                        system_status["uploaded_parts"] = part_num
+                        print(f"☁️ [Auto-Sync Supabase] Đang backup Part #{part_num} lên Supabase...")
+                        
+                        sub_url = upload_audio_to_supabase(seg_file, channel)
+                        raw_text = transcribe_with_cloud_whisper(seg_file)
+                        detected_tickers = extract_vn_tickers(raw_text) if raw_text else []
+                        ticker_str = ", ".join([t["ticker"] for t in detected_tickers]) if detected_tickers else "Theo dõi"
+
+                        send_telegram_message(
+                            f"🛡️ <b>ĐÃ BACKUP THÀNH CÔNG PART #{part_num} LÊN SUPABASE</b>\n\n"
+                            f"👤 Broker: <b>{profile['display_name']}</b> ({channel})\n"
+                            f"⏱️ Thời lượng segment: <b>5 phút</b>\n"
+                            f"🏷️ Mã phát hiện: <b>{ticker_str}</b>\n"
+                            f"🔗 Link Supabase: {sub_url if sub_url else 'Đã lưu'}"
+                        )
 
         # Upload final remaining segment
         mp3_files = sorted(glob.glob(os.path.join(session_dir, "part_*.mp3")))
@@ -166,7 +219,7 @@ def run_bulletproof_recording(stream_url: str, channel: str):
 
                 send_telegram_message(
                     f"✅ <b>HOÀN THÀNH TẬP TẬP BUỔI LIVE (PART #{part_num})</b>\n\n"
-                    f"👤 Broker: <b>{channel}</b>\n"
+                    f"👤 Broker: <b>{profile['display_name']}</b> ({channel})\n"
                     f"🏷️ Mã phát hiện: <b>{ticker_str}</b>\n"
                     f"🎉 Tổng số <b>{len(uploaded_files)} phần âm thanh</b> đã được bảo vệ 100% trên Supabase!"
                 )
@@ -179,6 +232,8 @@ def run_bulletproof_recording(stream_url: str, channel: str):
         system_status["is_currently_recording"] = False
         system_status["current_stream_channel"] = None
         system_status["recording_start_time"] = None
+        system_status["stop_requested"] = False
+        system_status["report_requested"] = False
 
 def background_tiktok_monitor_thread():
     channels = load_monitored_channels()

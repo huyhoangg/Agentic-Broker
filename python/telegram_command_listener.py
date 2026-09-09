@@ -1,5 +1,5 @@
 """
-Telegram Interactive Command Listener with Real-Time Recording Progress Tracker
+Telegram Interactive Command Listener with Real-Time Live Stream Process Manager
 """
 import os
 import time
@@ -21,11 +21,13 @@ def process_telegram_command(command_text: str, chat_id: str):
             f"🤖 <b>ĐIỀU KHIỂN TRỢ LÝ BROKER TIKTOK LIVE</b>\n\n"
             f"📌 <b>Các Lệnh Điều Khiển Có Thể Dùng:</b>\n\n"
             f"🔹 <code>/recording</code> : Xem TIẾN TRÌNH thu âm trực tiếp (Realtime Progress)\n"
+            f"🔹 <code>/report</code> : Ép trích xuất BÁO CÁO bóc tách cổ phiếu tức thì\n"
+            f"🔹 <code>/stop</code> : DỪNG THU ÂM buổi Live hiện tại\n"
             f"🔹 <code>/list</code> : Xem danh sách các kênh TikTok đang theo dõi\n"
             f"🔹 <code>/add @ten_kenh</code> : Thêm kênh Broker mới (Ví dụ: <code>/add @chng.khon.cng.win</code>)\n"
             f"🔹 <code>/remove @ten_kenh</code> : Xóa kênh khỏi danh sách theo dõi\n"
             f"🔹 <code>/status</code> : Kiểm tra tổng quan hệ thống Robot\n\n"
-            f"<i>Gõ <code>/recording</code> để xem tiến trình thu âm!</i>"
+            f"<i>Bấm nút tương tác ngay bên dưới thông báo Live hoặc gõ lệnh bất kỳ lúc nào!</i>"
         )
         send_telegram_message(help_msg)
 
@@ -34,6 +36,7 @@ def process_telegram_command(command_text: str, chat_id: str):
             ch = global_system_status.get("current_stream_channel", "@broker")
             start_dt = global_system_status.get("recording_start_time")
             fpath = global_system_status.get("current_filepath")
+            uploaded_parts = global_system_status.get("uploaded_parts", 0)
             
             elapsed_sec = int((datetime.now() - start_dt).total_seconds()) if start_dt else 0
             mins = elapsed_sec // 60
@@ -43,15 +46,25 @@ def process_telegram_command(command_text: str, chat_id: str):
             if fpath and os.path.exists(fpath):
                 size_mb = f"{round(os.path.getsize(fpath) / (1024 * 1024), 2)} MB"
 
+            buttons = {
+                "inline_keyboard": [
+                    [
+                        {"text": "📝 Báo Cáo Tức Thì", "callback_data": "/report"},
+                        {"text": "🛑 Dừng Thu Âm", "callback_data": "/stop"}
+                    ]
+                ]
+            }
+
             msg = (
                 f"🔴 <b>TIẾN TRÌNH THU ÂM LIVESTREAM TRỰC TIẾP</b>\n\n"
                 f"👤 Broker: <b>{ch}</b>\n"
                 f"⏰ Bắt đầu lúc: <code>{start_dt.strftime('%H:%M:%S %d/%m/%Y') if start_dt else 'N/A'}</code>\n"
                 f"⏱️ Đã thu được: <b>{mins} phút {secs} giây</b>\n"
-                f"💾 Dung lượng MP3 tạm thời: <b>{size_mb}</b>\n"
+                f"🛡️ Phân đoạn Supabase đã lưu: <b>{uploaded_parts} phần (5-min MP3)</b>\n"
                 f"🟢 Trạng thái: <b>Đang ghi âm 100% liền mạch...</b>\n\n"
-                f"<i>File MP3 đầy đủ sẽ tự động được tải lên Supabase ngay khi Broker tắt Live!</i>"
+                f"<i>Dùng <code>/report</code> để bóc tách mã ngay, hoặc <code>/stop</code> để dừng!</i>"
             )
+            send_telegram_message(msg, reply_markup=buttons)
         else:
             channels = load_monitored_channels()
             msg = (
@@ -60,7 +73,33 @@ def process_telegram_command(command_text: str, chat_id: str):
                 f"<i>{', '.join(channels) if channels else 'Chưa có kênh nào'}</i>\n\n"
                 f"🟢 Ngay khi có Broker bật Live, hệ thống sẽ tự động nhắn tin cho bạn!"
             )
-        send_telegram_message(msg)
+            send_telegram_message(msg)
+
+    elif text.startswith("/stop") or text.startswith("/cancel"):
+        if global_system_status and global_system_status.get("is_currently_recording"):
+            ch = global_system_status.get("current_stream_channel", "@broker")
+            global_system_status["stop_requested"] = True
+            msg = (
+                f"🛑 <b>ĐÃ GỬI LỆNH DỪNG THU ÂM!</b>\n\n"
+                f"👤 Broker: <b>{ch}</b>\n"
+                f"⏳ Hệ thống đang dừng luồng Live, hoàn tất lưu file MP3 cuối cùng & tải lên Supabase..."
+            )
+            send_telegram_message(msg)
+        else:
+            send_telegram_message("💤 Hiện tại không có buổi Live nào đang diễn ra để dừng!")
+
+    elif text.startswith("/report") or text.startswith("/transcribe"):
+        if global_system_status and global_system_status.get("is_currently_recording"):
+            ch = global_system_status.get("current_stream_channel", "@broker")
+            global_system_status["report_requested"] = True
+            msg = (
+                f"⚡ <b>ĐÃ YÊU CẦU BÁO CÁO TỨC THÌ!</b>\n\n"
+                f"👤 Broker: <b>{ch}</b>\n"
+                f"🧠 Groq Cloud Whisper đang trích xuất nội dung audio & phát hiện mã cổ phiếu..."
+            )
+            send_telegram_message(msg)
+        else:
+            send_telegram_message("💤 Hiện tại không có buổi Live nào đang diễn ra để tạo báo cáo tức thì.")
 
     elif text.startswith("/list"):
         channels = load_monitored_channels()
@@ -160,8 +199,30 @@ def start_telegram_command_poller(sys_status_ptr=None):
             if res.get("ok") and res.get("result"):
                 for update in res["result"]:
                     last_update_id = update["update_id"]
-                    msg = update.get("message")
-                    if msg and "text" in msg:
+
+                    # 1. Xử lý Callback Query từ Nút bấm tương tác
+                    if "callback_query" in update:
+                        cb = update["callback_query"]
+                        cb_id = cb["id"]
+                        cb_data = cb.get("data", "")
+                        chat_id = str(cb["message"]["chat"]["id"])
+
+                        # Trả lời Telegram API để tắt icon loading trên nút
+                        try:
+                            requests.post(
+                                f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/answerCallbackQuery",
+                                json={"callback_query_id": cb_id},
+                                timeout=3
+                            )
+                        except Exception:
+                            pass
+
+                        if cb_data:
+                            process_telegram_command(cb_data, chat_id)
+
+                    # 2. Xử lý Tin nhắn văn bản (Lệnh /command)
+                    elif "message" in update and "text" in update["message"]:
+                        msg = update["message"]
                         cmd_text = msg["text"]
                         chat_id = str(msg["chat"]["id"])
                         process_telegram_command(cmd_text, chat_id)

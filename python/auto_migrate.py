@@ -72,5 +72,7 @@ def run_migrations():
     print("⚠️ Không thể tự tạo bảng qua Direct Connection. Hãy dán file sql trong `supabase/migrations` vào Supabase SQL Editor.")
     return False
 
+auto_migrate_supabase = run_migrations
+
 if __name__ == "__main__":
     run_migrations()

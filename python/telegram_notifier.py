@@ -16,9 +16,9 @@ if os.path.exists(env_file):
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8643759548:AAF948HTbHKiD0YagFjSE2xpk8NkBqqKjlw")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "6009632759")
 
-def send_telegram_message(text: str):
+def send_telegram_message(text: str, reply_markup: dict = None):
     """
-    Gửi tin nhắn thông báo tức thì qua Telegram Bot về điện thoại
+    Gửi tin nhắn thông báo tức thì qua Telegram Bot về điện thoại (có hỗ trợ Nút bấm tương tác)
     """
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         print(f"[Telegram Notice (Local)]: {text}")
@@ -30,6 +30,8 @@ def send_telegram_message(text: str):
         "text": text,
         "parse_mode": "HTML"
     }
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
 
     try:
         res = requests.post(url, json=payload, timeout=10)
