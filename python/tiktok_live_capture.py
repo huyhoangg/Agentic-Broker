@@ -6,26 +6,13 @@ import sys
 import subprocess
 import time
 import imageio_ffmpeg
-
-# Ensure ffmpeg binary is in PATH
 import shutil
-bin_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "bin"))
-ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
-symlink_path = os.path.join(bin_dir, "ffmpeg")
 
 system_ffmpeg = shutil.which("ffmpeg")
 if system_ffmpeg:
     ffmpeg_binary = system_ffmpeg
 else:
-    ffmpeg_binary = symlink_path
-    if not os.path.exists(symlink_path) and not os.path.islink(symlink_path):
-        os.makedirs(bin_dir, exist_ok=True)
-        try:
-            os.symlink(ffmpeg_exe, symlink_path)
-        except FileExistsError:
-            pass
-
-os.environ["PATH"] = bin_dir + os.path.pathsep + os.environ.get("PATH", "")
+    ffmpeg_binary = imageio_ffmpeg.get_ffmpeg_exe()
 
 def get_tiktok_live_audio_stream_url(tiktok_username: str) -> str:
     """
@@ -38,8 +25,8 @@ def get_tiktok_live_audio_stream_url(tiktok_username: str) -> str:
     
     cmd = [
         "yt-dlp",
-        "-g",  # Print direct stream URL
-        "-f", "b[ext=mp4]/best", # Best stream
+        "-g",
+        "-f", "b[ext=mp4]/best",
         tiktok_url
     ]
     
@@ -50,28 +37,25 @@ def get_tiktok_live_audio_stream_url(tiktok_username: str) -> str:
             print(f"✅ Đã lấy thành công luồng Stream HLS của @{clean_username}")
             return stream_url
         else:
-            print(f"⚠️ Không lấy được luồng stream (Broker có thể đang TẮT LIVE hoặc link ẩn): {res.stderr}")
+            print(f"⚠️ Chưa phát hiện luồng Live (Kênh có thể đang tắt): {res.stderr[:100]}")
             return None
     except Exception as e:
         print(f"❌ Lỗi khi quét stream URL: {e}")
         return None
 
 def capture_stream_audio_chunks(stream_url: str, output_dir="chunks", chunk_sec=10):
-    """
-    Dùng ffmpeg cắt trực tiếp luồng live stream thành các file audio WAV 10s có đè overlap
-    """
     os.makedirs(output_dir, exist_ok=True)
     out_pattern = os.path.join(output_dir, "frame_%03d.wav")
 
     print(f"🎙️ Đang bắt luồng Audio từ Live Stream -> Cắt thành các file {chunk_sec}s vào folder '{output_dir}'...")
 
     ffmpeg_cmd = [
-        symlink_path,
+        ffmpeg_binary,
         "-i", stream_url,
-        "-vn",                   # Bỏ video, chỉ lấy audio
-        "-acodec", "pcm_s16le",  # Format WAV PCM 16bit chuẩn cho Whisper
-        "-ar", "16000",          # Sample rate 16kHz
-        "-ac", "1",              # Mono 1 channel
+        "-vn",
+        "-acodec", "pcm_s16le",
+        "-ar", "16000",
+        "-ac", "1",
         "-f", "segment",
         "-segment_time", str(chunk_sec),
         "-reset_timestamps", "1",

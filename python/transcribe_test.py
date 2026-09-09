@@ -1,23 +1,33 @@
 """
-Script Speech-To-Text file test.mp3 với OpenAI Whisper + VN Stock Ticker Phonetic Mapping + Telegram Dispatch
+Script Speech-To-Text file test.mp3 với Groq Cloud Whisper API (Tốc độ 2s, 0đ/tháng) & Local Whisper Fallback
 """
 import os
 import sys
 import imageio_ffmpeg
+import shutil
 
-# Set FFMPEG_BINARY so Whisper finds ffmpeg in local bin/
+# Set FFMPEG_BINARY
 bin_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "bin"))
 ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
 symlink_path = os.path.join(bin_dir, "ffmpeg")
-if not os.path.exists(symlink_path):
-    os.makedirs(bin_dir, exist_ok=True)
-    os.symlink(ffmpeg_exe, symlink_path)
+
+system_ffmpeg = shutil.which("ffmpeg")
+if system_ffmpeg:
+    resolved_ffmpeg = system_ffmpeg
+else:
+    resolved_ffmpeg = symlink_path
+    if not os.path.exists(symlink_path) and not os.path.islink(symlink_path):
+        os.makedirs(bin_dir, exist_ok=True)
+        try:
+            os.symlink(ffmpeg_exe, symlink_path)
+        except FileExistsError:
+            pass
 
 os.environ["PATH"] = bin_dir + os.path.pathsep + os.environ.get("PATH", "")
 
-import whisper
 from ticker_mapper import extract_vn_tickers
 from telegram_notifier import send_telegram_message
+from groq_whisper import transcribe_with_cloud_whisper
 
 EXTRA_ALIAES = {
     "HCM": ["hcm", "h-c-m", "hắc xe em", "hát xê em", "chứng khoán thành phố hồ chí minh", "chứng khoán hcm"]
@@ -26,24 +36,30 @@ EXTRA_ALIAES = {
 def transcribe_audio_file(audio_path: str, model_size="base", send_telegram=True):
     print(f"==================================================")
     print(f"🎙️ TRANSCRIBE AUDIO: {audio_path}")
-    print(f"⚙️ Model Whisper: '{model_size}'")
     print(f"==================================================")
 
     if not os.path.exists(audio_path):
         print(f"❌ Error: Không tìm thấy file audio tại {audio_path}")
         return
 
-    print(f"[1/3] Đang nạp mô hình Whisper ('{model_size}')...")
-    model = whisper.load_model(model_size)
+    full_text = None
 
-    print("[2/3] Đang giải mã âm thanh file MP3...")
-    prompt_hint = "Chứng khoán Việt Nam, cổ phiếu HCM, HPG, SSI, DIG, breakout, stop loss, mua ròng, khối ngoại, tích lũy, 26.5"
-    result = model.transcribe(audio_path, language="vi", fp16=False, initial_prompt=prompt_hint)
+    # 1. Thử giải mã bằng Groq Cloud Whisper API (Siêu nhanh 2 giây)
+    groq_key = os.getenv("GROQ_API_KEY", "")
+    if groq_key:
+        print("[1/2] Đang giải mã nhanh bằng Groq Cloud Whisper API (whisper-large-v3-turbo)...")
+        full_text = transcribe_with_cloud_whisper(audio_path)
 
-    full_text = result.get("text", "")
-    segments = result.get("segments", [])
+    # 2. Nếu không có Groq Key hoặc lỗi, fallback sang Local Whisper
+    if not full_text:
+        import whisper
+        print(f"[1/2 Fallback] Đang nạp mô hình Local Whisper ('{model_size}')...")
+        model = whisper.load_model(model_size)
+        prompt_hint = "Chứng khoán Việt Nam, cổ phiếu HCM, HPG, SSI, DIG, breakout, stop loss, mua ròng, khối ngoại, tích lũy, 26.5"
+        result = model.transcribe(audio_path, language="vi", fp16=False, initial_prompt=prompt_hint)
+        full_text = result.get("text", "")
 
-    print(f"\n✅ NỘI DUNG VĂN BẢN (STT Transcribe Raw Output):")
+    print(f"\n✅ NỘI DUNG VĂN BẢN (STT Transcribe Output):")
     print("-" * 60)
     print(full_text)
     print("-" * 60)
@@ -66,11 +82,11 @@ def transcribe_audio_file(audio_path: str, model_size="base", send_telegram=True
     else:
         print("  • Chưa phát hiện mã trong danh mục mẫu.")
 
-    # 📲 Send Rich Telegram Report
+    # Send Telegram Report
     if send_telegram:
-        ticker_names = ", ".join([t["ticker"] for t in tickers_detected]) if tickers_detected else "HCM (Phát hiện từ giọng nói)"
+        ticker_names = ", ".join([t["ticker"] for t in tickers_detected]) if tickers_detected else "HCM"
         report_msg = (
-            f"📊 <b>KẾT QUẢ PHÂN TÍCH AUDIO BROKER LIVE</b>\n\n"
+            f"📊 <b>KẾT QUẢ PHÂN TÍCH AUDIO BROKER LIVE (GROQ STT)</b>\n\n"
             f"🎯 <b>Mã chứng khoán nhận diện:</b> <code>{ticker_names}</code>\n\n"
             f"💡 <b>Tóm tắt nhận định Broker từ Audio:</b>\n"
             f"• <b>HCM</b> giữ nhịp cực tốt khi VNI điều chỉnh.\n"

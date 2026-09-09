@@ -1,10 +1,9 @@
-# Dockerfile cho Render Web Service 24/7 (TikTok Seamless Live Audio Streamer + UptimeRobot Keep-Alive)
+# Dockerfile Siêu Nhẹ Cho Render Web Service 24/7 (Groq Cloud STT + Supabase + UptimeRobot)
 FROM python:3.11-slim
 
-# Cài đặt ffmpeg và các công cụ hệ thống
+# Cài đặt ffmpeg và các công cụ hệ thống nhẹ
 RUN apt-get update && apt-get install -y \
     ffmpeg \
-    git \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
@@ -13,9 +12,9 @@ WORKDIR /app
 # Copy dependency files
 COPY package*.json ./
 
-# Cài đặt Python requirements
+# Cài đặt các gói Python siêu nhẹ (Không có PyTorch hay Local Whisper!)
 RUN pip install --no-cache-dir --upgrade pip
-RUN pip install --no-cache-dir yt-dlp openai-whisper imageio-ffmpeg soundfile requests
+RUN pip install --no-cache-dir yt-dlp imageio-ffmpeg soundfile requests
 
 # Copy toàn bộ code vào container
 COPY . .
