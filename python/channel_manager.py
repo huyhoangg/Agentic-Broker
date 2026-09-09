@@ -7,6 +7,15 @@ import requests
 
 CHANNELS_FILE = os.path.join(os.path.dirname(__file__), "..", "monitored_channels.json")
 
+# Auto-load .env file
+env_file = os.path.join(os.path.dirname(__file__), "..", ".env")
+if os.path.exists(env_file):
+    with open(env_file, "r", encoding="utf-8") as f:
+        for line in f:
+            if "=" in line and not line.startswith("#"):
+                k, v = line.strip().split("=", 1)
+                os.environ[k.strip()] = v.strip()
+
 def get_supabase_credentials():
     url_base = os.getenv("SUPABASE_URL", "")
     key_base = os.getenv("SUPABASE_KEY", "")
