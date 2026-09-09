@@ -1,6 +1,6 @@
 """
 Render Web Service + UptimeRobot 24/7 Multi-Channel Seamless TikTok Live Audio Streamer
-Interactive Control via Telegram Bot Commands (/add, /remove, /list, /status)
+Database-backed Monitored Channels (Supabase DB & Telegram Commands)
 """
 import os
 import sys
@@ -124,16 +124,16 @@ def run_seamless_recording(stream_url: str, channel: str):
 
 def background_tiktok_monitor_thread():
     channels = load_monitored_channels()
-    print(f"🤖 [Multi-Channel Monitor Started] Đang giám sát {len(channels)} kênh: {channels}")
+    print(f"🤖 [Multi-Channel Monitor Started] Đang giám sát {len(channels)} kênh từ DB/Storage: {channels}")
 
     send_telegram_message(
-        f"🚀 <b>MULTI-CHANNEL BROKER ASSISTANT ONLINE 24/7</b>\n\n"
-        f"📋 Đang giám sát <b>{len(channels)} kênh TikTok Broker</b>:\n"
-        f"<i>{', '.join(channels)}</i>\n\n"
+        f"🚀 <b>DATABASE-BACKED BROKER ASSISTANT ONLINE 24/7</b>\n\n"
+        f"📋 Đang giám sát <b>{len(channels)} kênh TikTok</b> trong Supabase DB:\n"
+        f"<i>{', '.join(channels) if channels else 'Chưa có kênh nào. Dùng /add @ten_kenh để thêm!'}</i>\n\n"
         f"💡 Bạn có thể dùng các lệnh Telegram để điều khiển:\n"
         f"• <code>/list</code> : Xem danh sách kênh\n"
-        f"• <code>/add @ten_kenh</code> : Thêm kênh mới\n"
-        f"• <code>/remove @ten_kenh</code> : Xóa kênh"
+        f"• <code>/add @ten_kenh</code> : Thêm kênh mới vào DB\n"
+        f"• <code>/remove @ten_kenh</code> : Xóa kênh khỏi DB"
     )
 
     while True:
@@ -143,6 +143,9 @@ def background_tiktok_monitor_thread():
             
             if not system_status["is_currently_recording"]:
                 current_channels = load_monitored_channels()
+                if not current_channels:
+                    print(f"[🔍 {now_str}] Chưa có kênh nào trong DB. Chờ bạn gõ /add @ten_kenh trên Telegram...")
+                
                 for target_ch in current_channels:
                     print(f"[🔍 {now_str}] Quét luồng Live kênh {target_ch}...")
                     stream_url = get_tiktok_live_audio_stream_url(target_ch)
@@ -173,7 +176,7 @@ def start_server():
     # Start HTTP Health Check Web Server
     server_address = ('0.0.0.0', PORT)
     httpd = HTTPServer(server_address, HealthCheckHandler)
-    print(f"🌐 Multi-Channel Web Server listening on 0.0.0.0:{PORT}...")
+    print(f"🌐 Server listening on 0.0.0.0:{PORT}...")
     httpd.serve_forever()
 
 if __name__ == "__main__":
