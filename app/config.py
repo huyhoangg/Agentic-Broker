@@ -1,9 +1,11 @@
 import os
 from pathlib import Path
 
-from dotenv import load_dotenv
-
-load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+try:
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+except ImportError:
+    pass
 
 
 def _int(name: str, default: int) -> int:
@@ -25,7 +27,8 @@ SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
 SUPABASE_BUCKET = os.getenv("SUPABASE_BUCKET", "broker-agent")
 SUPABASE_DB_HOST = os.getenv("SUPABASE_DB_HOST", "aws-0-ap-southeast-2.pooler.supabase.com")
-SUPABASE_DB_PORT = _int("SUPABASE_DB_PORT", 5432)
+# 6543 = Supavisor transaction pooler (high client limit; session pooler on 5432 caps at 15 clients)
+SUPABASE_DB_PORT = _int("SUPABASE_DB_PORT", 6543)
 SUPABASE_PW = os.getenv("SUPABASE_PW", "")
 
 # --- Groq ---
@@ -55,13 +58,15 @@ SOURCE_HANDLES = [h.strip() for h in os.getenv("SOURCE_HANDLES", "").split(",") 
 ANALYZE_WITH_LLM = os.getenv("ANALYZE_WITH_LLM", "true").lower() in ("1", "true", "yes")
 NOTIFY_TELEGRAM = os.getenv("NOTIFY_TELEGRAM", "true").lower() in ("1", "true", "yes")
 
-# Local Postgres DSN (session pooler). Works everywhere, incl. IPv4-only hosts.
+# Local Postgres DSN (Supavisor transaction pooler). Works everywhere, incl. IPv4-only hosts.
 def database_dsn() -> str:
     ref = SUPABASE_URL.split("//")[-1].split(".")[0] if SUPABASE_URL else ""
     user = os.getenv("SUPABASE_DB_USER") or f"postgres.{ref}"
     return (
         f"host={SUPABASE_DB_HOST} port={SUPABASE_DB_PORT} dbname=postgres "
-        f"user={user} password={SUPABASE_PW} connect_timeout=10"
+        f"user={user} password={SUPABASE_PW} connect_timeout=10 "
+        "keepalives=1 keepalives_idle=30 keepalives_interval=10 keepalives_count=3 "
+        "options='-c statement_timeout=15000'"
     )
 
 

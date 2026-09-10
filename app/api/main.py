@@ -1,5 +1,10 @@
 """FastAPI control-plane API: sources CRUD + pipeline views + telemetry console."""
 import logging
+import os
+import signal
+import subprocess
+import sys
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -17,7 +22,16 @@ app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
 )
 
+# `kill -USR1 <pid>` dumps all thread stacks to stderr — forensics for wedges.
+import faulthandler
+import signal as _signal
+
+faulthandler.register(_signal.SIGUSR1)
+
 CONSOLE_DIR = Path(__file__).resolve().parent / "console"
+ROOT_DIR = Path(__file__).resolve().parents[2]
+PID_DIR = ROOT_DIR / "tmp"
+WORKER_TYPES = ("scanner", "capture", "stt")
 
 
 @app.get("/", include_in_schema=False)
@@ -63,7 +77,17 @@ def health():
 
 @app.get("/sources")
 def list_sources():
-    return db.fetch_all("SELECT * FROM sources ORDER BY id")
+    return db.fetch_all(
+        """
+        SELECT src.*,
+               ls.id AS live_session_id, ls.status AS live_status, ls.created_at AS live_since
+        FROM sources src
+        LEFT JOIN live_sessions ls
+               ON ls.source_id = src.id
+              AND ls.status IN ('DISCOVERED', 'CAPTURING', 'FINALIZING')
+        ORDER BY src.id
+        """
+    )
 
 
 @app.post("/sources", status_code=201)
@@ -236,6 +260,217 @@ def list_jobs(status: Optional[str] = None, limit: int = 100):
 @app.get("/workers")
 def list_workers():
     return db.fetch_all("SELECT * FROM workers ORDER BY type, id")
+
+
+@app.on_event("startup")
+def startup_event():
+    import threading
+    from ..telegram import start_telegram_command_poller
+
+    t = threading.Thread(target=start_telegram_command_poller, daemon=True)
+    t.start()
+    log.info("Started Telegram Bot Command Poller & Price Notifier thread.")
+
+
+# --- script (worker process) control ---
+
+def _pidfile(wtype: str) -> Path:
+    return PID_DIR / f"worker_{wtype}.pid"
+
+
+def _log_file(wtype: str) -> Path:
+    return PID_DIR / f"worker_{wtype}.log"
+
+
+def _alive(pid: Optional[int]) -> bool:
+    if not pid:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except (ProcessLookupError, PermissionError):
+        return False
+
+
+def _read_pid(wtype: str) -> Optional[int]:
+    try:
+        return int(_pidfile(wtype).read_text().strip())
+    except Exception:
+        return None
+
+
+def _find_worker_pids(wtype: str) -> list[int]:
+    """PIDs of live worker processes, matched by cmdline to avoid killing recycled PIDs."""
+    try:
+        out = subprocess.run(
+            ["pgrep", "-f", f"python -m app.{wtype}"], capture_output=True, text=True, timeout=5
+        )
+        pids = []
+        for raw in out.stdout.split():
+            try:
+                pid = int(raw)
+            except ValueError:
+                continue
+            if pid == os.getpid():
+                continue
+            try:
+                cmd = subprocess.run(
+                    ["ps", "-p", str(pid), "-o", "command="], capture_output=True, text=True, timeout=5
+                ).stdout
+            except Exception:
+                continue
+            if f"-m app.{wtype}" in cmd:
+                pids.append(pid)
+        return pids
+    except Exception:
+        return []
+
+
+def _terminate(pid: int, timeout: float = 10):
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    deadline = time.time() + timeout
+    while _alive(pid) and time.time() < deadline:
+        time.sleep(0.5)
+    if _alive(pid):
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
+@app.get("/scripts")
+def list_scripts():
+    rows = db.fetch_all(
+        """
+        SELECT id, type, status, current_task, last_heartbeat,
+               EXTRACT(EPOCH FROM (NOW() - last_heartbeat))::int AS hb_age
+        FROM workers WHERE type = ANY(%s) ORDER BY last_heartbeat DESC
+        """,
+        (list(WORKER_TYPES),),
+    )
+    out = {}
+    for wtype in WORKER_TYPES:
+        pid = _read_pid(wtype)
+        out[wtype] = {
+            "pid": pid,
+            "alive": _alive(pid) or bool(_find_worker_pids(wtype)),
+            "workers": [r for r in rows if r["type"] == wtype][:3],
+        }
+    return out
+
+
+@app.post("/scripts/{wtype}/start")
+def start_script(wtype: str):
+    if wtype not in WORKER_TYPES:
+        raise HTTPException(404, "unknown worker type")
+    pid = _read_pid(wtype)
+    if _alive(pid):
+        raise HTTPException(409, f"{wtype} already running (pid {pid})")
+    PID_DIR.mkdir(exist_ok=True)
+    logf = open(_log_file(wtype), "ab")
+    proc = subprocess.Popen(
+        [sys.executable, "-m", f"app.{wtype}"],
+        cwd=str(ROOT_DIR), stdout=logf, stderr=subprocess.STDOUT,
+        start_new_session=True,
+    )
+    _pidfile(wtype).write_text(str(proc.pid))
+    log.info("started %s (pid %s)", wtype, proc.pid)
+    return {"type": wtype, "pid": proc.pid, "status": "started"}
+
+
+@app.post("/scripts/{wtype}/stop")
+def stop_script(wtype: str):
+    if wtype not in WORKER_TYPES:
+        raise HTTPException(404, "unknown worker type")
+    pids = set(_find_worker_pids(wtype))
+    pid = _read_pid(wtype)
+    if _alive(pid):
+        pids.add(pid)
+    for p in pids:
+        _terminate(p)
+    _pidfile(wtype).unlink(missing_ok=True)
+    db.execute(
+        "UPDATE workers SET status = 'STOPPED', current_task = NULL WHERE type = %s AND status = 'HEALTHY'",
+        (wtype,),
+    )
+    log.info("stopped %s", wtype)
+    return {"type": wtype, "status": "stopped", "killed": sorted(pids)}
+
+
+@app.post("/scripts/{wtype}/restart")
+def restart_script(wtype: str):
+    stop_script(wtype)
+    time.sleep(1)
+    return start_script(wtype)
+
+
+@app.get("/scripts/{wtype}/log")
+def script_log(wtype: str, lines: int = 80):
+    if wtype not in WORKER_TYPES:
+        raise HTTPException(404, "unknown worker type")
+    try:
+        content = _log_file(wtype).read_text(errors="replace").splitlines()
+        return {"log": "\n".join(content[-lines:])}
+    except FileNotFoundError:
+        return {"log": ""}
+
+
+# --- audio management ---
+
+@app.get("/audio")
+def list_audio(limit: int = 60, session_id: Optional[int] = None):
+    rows = db.fetch_all(
+        """
+        SELECT c.id, c.live_session_id, c.sequence, c.status, c.attempts, c.size_bytes,
+               c.storage_path, c.error, c.created_at,
+               s.handle, ls.status AS session_status,
+               (t.id IS NOT NULL) AS has_transcript
+        FROM audio_chunks c
+        JOIN live_sessions ls ON ls.id = c.live_session_id
+        JOIN sources s ON s.id = ls.source_id
+        LEFT JOIN transcripts t ON t.audio_chunk_id = c.id
+        WHERE (%s::bigint IS NULL OR c.live_session_id = %s)
+        ORDER BY c.id DESC
+        LIMIT %s
+        """,
+        (session_id, session_id, limit),
+    )
+    stats = db.fetch_one(
+        "SELECT COUNT(*) AS total, COALESCE(SUM(size_bytes), 0) AS total_bytes FROM audio_chunks"
+    )
+    return {"stats": stats, "chunks": rows}
+
+
+@app.delete("/audio/{chunk_id}")
+def delete_chunk(chunk_id: int):
+    row = db.fetch_one("SELECT storage_path FROM audio_chunks WHERE id = %s", (chunk_id,))
+    if not row:
+        raise HTTPException(404, "chunk not found")
+    storage.delete(row["storage_path"])
+    db.execute("DELETE FROM audio_chunks WHERE id = %s", (chunk_id,))
+    log.info("deleted chunk %s (%s)", chunk_id, row["storage_path"])
+    return {"deleted": chunk_id}
+
+
+# --- raw storage browse (incl. legacy folders) ---
+
+@app.get("/storage")
+def browse_storage(prefix: str = "", limit: int = 200):
+    import requests as rq
+
+    url = f"{config.SUPABASE_URL}/storage/v1/object/list/{config.SUPABASE_BUCKET}"
+    res = rq.post(
+        url,
+        headers={"Authorization": f"Bearer {config.SUPABASE_KEY}", "apikey": config.SUPABASE_KEY},
+        json={"prefix": prefix, "limit": limit, "sortBy": {"column": "created_at", "order": "desc"}},
+        timeout=15,
+    )
+    if res.status_code != 200:
+        raise HTTPException(502, f"storage list failed: {res.status_code}")
+    return res.json()
 
 
 app.mount("/console", StaticFiles(directory=CONSOLE_DIR, html=True), name="console")

@@ -6,3 +6,5 @@ uvicorn[standard]>=0.29
 yt-dlp>=2024.4.9
 curl-cffi>=0.7
 imageio-ffmpeg>=0.5
+pandas>=2.0.0
+vnstock>=4.0.6
