@@ -12,9 +12,9 @@ WORKDIR /app
 # Copy dependency files
 COPY package*.json ./
 
-# Cài đặt các gói Python siêu nhẹ (Không có PyTorch hay Local Whisper!)
+# Cài đặt các gói Python siêu nhẹ + curl-cffi (Bắt buộc để vượt chặn Cloudflare TikTok trên Render)
 RUN pip install --no-cache-dir --upgrade pip
-RUN pip install --no-cache-dir yt-dlp imageio-ffmpeg soundfile requests psycopg2-binary
+RUN pip install --no-cache-dir yt-dlp curl-cffi imageio-ffmpeg soundfile requests psycopg2-binary
 
 # Copy toàn bộ code vào container
 COPY . .
