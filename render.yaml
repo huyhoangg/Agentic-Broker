@@ -4,7 +4,7 @@ services:
     name: self-broker-console
     env: static
     buildCommand: echo "static console"
-    staticPublishPath: ./console
+    staticPublishPath: ./app/api/console
     headers:
       - path: /*
         name: Cache-Control

@@ -497,7 +497,13 @@ def browse_storage(prefix: str = "", limit: int = 200):
 
 
 CONSOLE_DIR = Path(__file__).resolve().parent / "console"
-app.mount("/console", StaticFiles(directory=CONSOLE_DIR, html=True), name="console")
+
+if CONSOLE_DIR.exists():
+    app.mount("/console", StaticFiles(directory=CONSOLE_DIR, html=True), name="console")
+
+    @app.get("/console", include_in_schema=False)
+    def redirect_console_no_slash():
+        return RedirectResponse(url="/console/")
 
 
 if __name__ == "__main__":
