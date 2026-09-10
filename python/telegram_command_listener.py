@@ -15,6 +15,7 @@ from watchlist_manager import (
     remove_from_watchlist,
     get_recent_digest_for_watchlist
 )
+from stock_price_notifier import fetch_price_digest_for_tickers
 
 last_update_id = 0
 global_system_status = None
@@ -29,6 +30,7 @@ def process_telegram_command(command_text: str, chat_id: str):
             f"🔹 <code>/watch CEO, SSI, HPG</code> : Thêm các mã cổ phiếu quan tâm vào Watchlist\n"
             f"🔹 <code>/watchlist</code> : Xem danh sách mã cổ phiếu bạn đang theo dõi\n"
             f"🔹 <code>/unwatch CEO</code> : Xóa mã cổ phiếu khỏi danh sách\n"
+            f"🔹 <code>/price</code> : Xem bảng giá thị trường realtime cho Watchlist\n"
             f"🔹 <code>/digest</code> : Tổng hợp báo cáo AI mới nhất cho các mã trong Watchlist\n\n"
             f"📌 <b>Các Lệnh Giám Sát Livestream:</b>\n"
             f"🔹 <code>/recording</code> : Xem tiến trình thu âm trực tiếp\n"
@@ -39,7 +41,7 @@ def process_telegram_command(command_text: str, chat_id: str):
             f"🔹 <code>/remove @ten_kenh</code> : Xóa kênh TikTok\n"
             f"🔹 <code>/status</code> : Kiểm tra tổng quan hệ thống\n"
         )
-        send_telegram_message(help_msg)
+        send_telegram_message(help_msg, chat_id=chat_id)
 
     # --- WATCHLIST MANAGEMENT COMMANDS ---
     elif text.startswith("/watch") or text.startswith("/addstock"):
@@ -96,7 +98,21 @@ def process_telegram_command(command_text: str, chat_id: str):
             f"➖ Đã xóa: {rem_str}\n"
             f"📋 Danh mục còn lại: {all_str}"
         )
-        send_telegram_message(msg)
+        send_telegram_message(msg, chat_id=chat_id)
+
+    elif text.startswith("/price") or text.startswith("/gia") or text.startswith("/banggia"):
+        watchlist = get_user_watchlist(chat_id)
+        if not watchlist:
+            send_telegram_message(
+                f"📋 <b>DANH MỤC WATCHLIST CỦA BẠN ĐANG TRỐNG</b>\n\n"
+                f"💡 Hãy thêm mã cổ phiếu quan tâm bằng lệnh: <code>/watch CEO, SSI, HPG</code>",
+                chat_id=chat_id
+            )
+            return
+
+        send_telegram_message("⏳ Đang tải dữ liệu giá chứng khoán realtime từ sàn...", chat_id=chat_id)
+        price_msg = fetch_price_digest_for_tickers(watchlist)
+        send_telegram_message(price_msg, chat_id=chat_id)
 
     elif text.startswith("/digest") or text.startswith("/summary") or text.startswith("/baocao"):
         send_telegram_message("⏳ Đang tổng hợp dữ liệu phân tích AI mới nhất từ Supabase DB cho danh mục của bạn...")

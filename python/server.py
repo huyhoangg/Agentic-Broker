@@ -313,12 +313,17 @@ def background_tiktok_monitor_thread():
             print(f"⚠️ Monitor error: {e}")
             time.sleep(30)
 
+from stock_price_notifier import start_hourly_price_notifier_thread
+
 def start_server():
     cmd_thread = threading.Thread(target=start_telegram_command_poller, args=(system_status,), daemon=True)
     cmd_thread.start()
 
     monitor_thread = threading.Thread(target=background_tiktok_monitor_thread, daemon=True)
     monitor_thread.start()
+
+    # Khởi chạy thread tự động báo giá cổ phiếu 1 tiếng/lần trong giờ giao dịch TTCK Việt Nam
+    start_hourly_price_notifier_thread()
 
     server_address = ('0.0.0.0', PORT)
     httpd = HTTPServer(server_address, HealthCheckHandler)
