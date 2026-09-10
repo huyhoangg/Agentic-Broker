@@ -12,9 +12,9 @@ WORKDIR /app
 # Copy dependency files
 COPY package*.json ./
 
-# Cài đặt các gói Python siêu nhẹ + curl-cffi (Bắt buộc để vượt chặn Cloudflare TikTok trên Render)
+# Cài đặt các gói Python: vnstock, vnai, pandas, curl-cffi, yt-dlp
 RUN pip install --no-cache-dir --upgrade pip
-RUN pip install --no-cache-dir yt-dlp curl-cffi imageio-ffmpeg soundfile requests psycopg2-binary
+RUN pip install --no-cache-dir yt-dlp curl-cffi imageio-ffmpeg soundfile requests psycopg2-binary pandas "vnstock>=4.0.6" "vnai>=2.5.7"
 
 # Copy toàn bộ code vào container
 COPY . .
