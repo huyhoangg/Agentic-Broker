@@ -1,0 +1,832 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SELF-BROKER /// CONSOLE</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=VT323&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0A0A0A;
+    --panel: #111110;
+    --inset: #0D0D0C;
+    --line: #2A2A28;
+    --hair: #1A1A19;
+    --fg: #EAEAEA;
+    --dim: #87857F;
+    --faint: #55534E;
+    --red: #FF2A2A;
+    --green: #4AF626;
+    --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --crt: "VT323", var(--mono);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { background: var(--bg); }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font: 400 12px/1.45 var(--mono);
+    letter-spacing: .04em;
+    min-height: 100dvh;
+    -webkit-font-smoothing: antialiased;
+  }
+  /* CRT scanlines + grain: fixed, pointer-events-none overlays only */
+  body::before {
+    content: "";
+    position: fixed; inset: 0; z-index: 90; pointer-events: none;
+    background: repeating-linear-gradient(0deg, transparent 0 2px, rgba(0,0,0,.13) 2px 4px);
+  }
+  body::after {
+    content: "";
+    position: fixed; inset: 0; z-index: 91; pointer-events: none; opacity: .05;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+  ::selection { background: var(--red); color: var(--bg); }
+
+  .wrap { max-width: 1400px; margin: 0 auto; padding: 14px 16px 20px; }
+
+  /* ---------- header ---------- */
+  header {
+    display: flex; align-items: flex-end; justify-content: space-between;
+    gap: 12px; flex-wrap: wrap;
+    border: 1px solid var(--line); border-bottom: 2px solid var(--fg);
+    padding: 10px 14px 12px; background: var(--panel);
+  }
+  .brand { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+  .brand h1 {
+    font: 400 clamp(2rem, 4vw, 3rem)/0.85 var(--crt);
+    letter-spacing: .02em; text-transform: uppercase;
+  }
+  .brand h1 em { font-style: normal; color: var(--red); }
+  .brand .sub { color: var(--dim); font-size: 10px; text-transform: uppercase; letter-spacing: .12em; }
+  .hud { display: flex; align-items: center; gap: 18px; font-size: 11px; text-transform: uppercase; }
+  .hud .k { color: var(--dim); }
+  .led {
+    display: inline-block; width: 8px; height: 8px;
+    background: var(--green); vertical-align: middle; margin-right: 6px;
+  }
+  .led.bad { background: var(--red); animation: blink 1s steps(2) infinite; }
+  .led.wait { background: var(--faint); }
+  .hud-btn {
+    background: transparent; color: var(--dim); border: 1px solid var(--line);
+    padding: 3px 10px; font-size: 10px;
+  }
+  .hud-btn:hover { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+  .hud-btn.busy { color: var(--red); border-color: var(--red); animation: blink .8s steps(2) infinite; }
+  #clock { font: 400 1.4rem/1 var(--crt); letter-spacing: .05em; }
+
+  /* ---------- link-down banner ---------- */
+  .errbar {
+    margin-top: 1px; border: 1px solid var(--red); border-left-width: 6px;
+    background: #180b0b; color: var(--red);
+    padding: 7px 14px; font-size: 11px; text-transform: uppercase; letter-spacing: .1em;
+  }
+
+  /* ---------- stat strip ---------- */
+  .stats {
+    display: grid; grid-template-columns: repeat(6, 1fr); gap: 1px;
+    background: var(--line); border: 1px solid var(--line); margin-top: 14px;
+  }
+  .cell { background: var(--panel); padding: 10px 14px 12px; }
+  .cell .lbl {
+    display: block; color: var(--dim); font-size: 10px;
+    text-transform: uppercase; letter-spacing: .14em; margin-bottom: 2px;
+  }
+  .cell .num {
+    font: 400 clamp(2.6rem, 5vw, 4.2rem)/0.85 var(--crt);
+    display: block; font-variant-numeric: tabular-nums;
+  }
+  .cell.alert .num { color: var(--red); }
+  .cell.okc .num { color: var(--green); }
+
+  /* ---------- layout grid ---------- */
+  main {
+    display: grid; gap: 14px; margin-top: 14px;
+    grid-template-columns: 1.55fr 1fr;
+    grid-template-areas:
+      "workers workers"
+      "sessions detail"
+      "sources jobs";
+  }
+  .panel { border: 1px solid var(--line); background: var(--panel); min-width: 0; }
+  .p-workers  { grid-area: workers; }
+  .p-sessions { grid-area: sessions; }
+  .p-detail   { grid-area: detail; }
+  .p-sources  { grid-area: sources; }
+  .p-jobs     { grid-area: jobs; }
+  .panel > h2 {
+    display: flex; justify-content: space-between; align-items: center; gap: 10px;
+    padding: 8px 12px; font: 400 11px/1 var(--mono);
+    text-transform: uppercase; letter-spacing: .14em;
+    border-bottom: 1px solid var(--line); background: var(--panel);
+  }
+  .panel > h2 .n { color: var(--dim); font-weight: 400; }
+  .scroll { overflow: auto; }
+  .p-workers .scroll  { max-height: 260px; }
+  .p-sessions .scroll { max-height: 380px; }
+  .p-jobs .scroll     { max-height: 300px; }
+
+  /* ---------- tables ---------- */
+  table { width: 100%; border-collapse: collapse; font-size: 11px; }
+  th {
+    text-align: left; color: var(--dim); font-weight: 400;
+    text-transform: uppercase; letter-spacing: .1em; font-size: 10px;
+    padding: 6px 12px; border-bottom: 1px solid var(--line);
+    background: var(--panel); position: sticky; top: 0; z-index: 2;
+    white-space: nowrap;
+  }
+  td {
+    padding: 6px 12px; border-bottom: 1px solid var(--hair);
+    white-space: nowrap; vertical-align: middle;
+  }
+  td.wrap { white-space: normal; word-break: break-word; }
+  .dim { color: var(--dim); }
+  .red { color: var(--red); }
+  tbody tr.rsel { cursor: pointer; }
+  tbody tr.rsel:hover { background: #171614; }
+  tbody tr.r-active { background: #14130f; box-shadow: inset 3px 0 0 var(--red); }
+
+  /* status badges — one palette: red = fail, green = done/healthy only */
+  .st {
+    display: inline-block; padding: 1px 6px 0; border: 1px solid var(--line);
+    font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim);
+  }
+  .st.bad { color: var(--red); border-color: rgba(255,42,42,.55); }
+  .st.ok  { color: var(--green); border-color: rgba(74,246,38,.4); }
+  .st.busy { color: var(--fg); border-color: var(--faint); animation: blink 1.1s steps(2) infinite; }
+
+  /* chunk progress bar */
+  .prog { display: inline-block; width: 52px; height: 7px; border: 1px solid var(--line); vertical-align: middle; }
+  .prog i { display: block; height: 100%; background: var(--fg); }
+  .prog.full i { background: var(--green); }
+
+  /* ---------- detail ---------- */
+  .empty {
+    padding: 42px 16px; text-align: center; color: var(--faint);
+    text-transform: uppercase; letter-spacing: .12em; font-size: 12px;
+  }
+  .empty small { display: block; margin-top: 6px; color: #3E3D39; font-size: 10px; letter-spacing: .1em; }
+  .d-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--line); border-bottom: 1px solid var(--line); }
+  .d-meta div { background: var(--panel); padding: 6px 12px; }
+  .d-meta .k { color: var(--dim); font-size: 9px; text-transform: uppercase; letter-spacing: .12em; display: block; }
+  .d-meta .v { font-size: 11px; word-break: break-all; white-space: normal; }
+  .d-sec {
+    padding: 6px 12px; color: var(--dim); font-size: 10px;
+    text-transform: uppercase; letter-spacing: .14em;
+    border-bottom: 1px solid var(--hair); background: var(--inset);
+    display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  }
+  .d-sec b { color: var(--fg); font-weight: 400; }
+  .d-sec .mini { border: 0; border-left: 1px solid var(--line); padding: 2px 8px; font-size: 10px; color: var(--fg); background: transparent; }
+  .d-sec .mini:hover { background: var(--fg); color: var(--bg); }
+  .trx { padding: 9px 12px 10px; border-bottom: 1px solid var(--hair); }
+  .trx .h { color: var(--dim); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; margin-bottom: 4px; }
+  .trx .h b { color: var(--fg); font-weight: 400; }
+  .trx p { white-space: pre-wrap; word-break: break-word; font-size: 11.5px; line-height: 1.55; }
+  .analysis {
+    margin-top: 6px; padding: 6px 8px 6px 10px;
+    border-left: 3px solid var(--red); background: var(--inset);
+    font-size: 11px; line-height: 1.5; white-space: pre-wrap; word-break: break-word;
+  }
+  .analysis::before { content: "ANALYSIS ///"; display: block; color: var(--red); font-size: 9px; letter-spacing: .14em; margin-bottom: 3px; }
+
+  /* ---------- sources ---------- */
+  .src-bar {
+    display: flex; gap: 1px; align-items: stretch;
+    border-bottom: 1px solid var(--line); background: var(--line);
+  }
+  .src-bar .tag { background: var(--inset); color: var(--dim); padding: 8px 12px; font-size: 10px; text-transform: uppercase; letter-spacing: .12em; align-self: center; }
+  #add-form { display: flex; flex: 1; gap: 1px; }
+  #add-form input {
+    flex: 0 1 240px; background: var(--inset); border: 0; outline: 0;
+    color: var(--fg); font: 400 12px var(--mono); letter-spacing: .05em; padding: 8px 12px;
+  }
+  #add-form input::placeholder { color: var(--faint); }
+  #add-form input:focus { background: #131310; box-shadow: inset 0 -2px 0 var(--red); }
+  button {
+    font: 400 11px var(--mono); text-transform: uppercase; letter-spacing: .1em;
+    background: transparent; color: var(--fg); border: 0; cursor: pointer;
+    padding: 8px 14px; border-left: 1px solid var(--line);
+  }
+  button:hover { background: var(--fg); color: var(--bg); }
+  button:active { transform: translateY(1px); }
+  button.armed { color: var(--red); }
+  button.armed:hover { background: var(--red); color: var(--bg); }
+  td .act { padding: 2px 8px; font-size: 10px; border-left: 1px solid var(--line); }
+  td .act.off { color: var(--dim); }
+
+  /* status filter + search bars */
+  .flt { display: flex; gap: 1px; background: var(--line); border-bottom: 1px solid var(--line); }
+  .flt button {
+    border: 0; border-right: 1px solid var(--line); background: var(--panel);
+    color: var(--dim); padding: 5px 11px; font-size: 10px;
+  }
+  .flt button.on { background: var(--fg); color: var(--bg); }
+  .qbar {
+    display: flex; gap: 1px; align-items: stretch;
+    border-bottom: 1px solid var(--line); background: var(--line);
+  }
+  .qbar .tag { background: var(--inset); color: var(--dim); padding: 8px 12px; font-size: 10px; text-transform: uppercase; letter-spacing: .12em; align-self: center; white-space: nowrap; }
+  .qbar form { display: flex; flex: 1; gap: 1px; }
+  .qbar input {
+    flex: 1; min-width: 0; background: var(--inset); border: 0; outline: 0;
+    color: var(--fg); font: 400 12px var(--mono); letter-spacing: .05em; padding: 8px 12px;
+  }
+  .qbar input::placeholder { color: var(--faint); }
+  .qbar input:focus { background: #131310; box-shadow: inset 0 -2px 0 var(--red); }
+
+  /* action feedback toast */
+  .toast {
+    position: fixed; top: 14px; right: 16px; z-index: 95;
+    border: 1px solid var(--line); border-left: 4px solid var(--green);
+    background: var(--panel); padding: 8px 14px;
+    font-size: 11px; text-transform: uppercase; letter-spacing: .1em;
+  }
+  .toast.bad { border-left-color: var(--red); color: var(--red); }
+
+  /* modal reader */
+  .modal { position: fixed; inset: 0; z-index: 80; background: rgba(5,5,4,.9); display: flex; align-items: center; justify-content: center; padding: 20px; }
+  .modal[hidden] { display: none; }
+  .modal-panel {
+    width: min(880px, 94vw); max-height: 86dvh; display: flex; flex-direction: column;
+    background: var(--panel); border: 1px solid var(--line); border-top: 3px solid var(--red);
+  }
+  .modal-panel > h2 {
+    display: flex; justify-content: space-between; align-items: center; gap: 10px;
+    padding: 8px 12px; font: 400 11px/1 var(--mono);
+    text-transform: uppercase; letter-spacing: .14em;
+    border-bottom: 1px solid var(--line);
+  }
+  .modal-panel > h2 button { border-left: 1px solid var(--line); padding: 4px 10px; }
+  .modal-body { overflow: auto; flex: 1; }
+
+  /* ---------- footer ---------- */
+  footer {
+    margin-top: 14px; border: 1px solid var(--line); background: var(--panel);
+    padding: 8px 12px; display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+    color: var(--faint); font-size: 10px; text-transform: uppercase; letter-spacing: .12em;
+  }
+  footer .red { color: var(--red); }
+
+  @keyframes blink { 50% { opacity: .25; } }
+  .load { color: var(--faint); animation: blink 1.4s steps(2) infinite; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .st.busy, .led.bad, .load { animation: none; }
+  }
+
+  @media (max-width: 980px) {
+    main { grid-template-columns: 1fr; grid-template-areas: "workers" "sessions" "detail" "sources" "jobs"; }
+    .stats { grid-template-columns: repeat(2, 1fr); }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="brand">
+      <h1>SELF-BROKER<em>///</em>CONSOLE</h1>
+      <span class="sub">&lt; PIPELINE TELEMETRY &gt;</span>
+    </div>
+    <div class="hud">
+      <span><i id="linkled" class="led wait"></i><span class="k">API</span> <b id="linktxt">SYNC</b></span>
+      <span><span class="k">SYNC</span> <b id="sync">--</b>S</span>
+      <span><button class="hud-btn" id="btn-recover" title="Chạy recovery sweep ngay">RECOVER</button></span>
+      <span><span class="k">R</span>=REFRESH</span>
+      <span id="clock">--:--:--</span>
+    </div>
+  </header>
+
+  <div class="errbar" id="errbar" hidden>&gt;&gt; LINK DOWN — RETAINING LAST FRAME // RETRYING</div>
+
+  <section class="stats" aria-label="pipeline counters">
+    <div class="cell"><span class="lbl">[ ACTIVE SOURCES ]</span><data class="num" id="st-sources">—</data></div>
+    <div class="cell"><span class="lbl">[ CAPTURING ]</span><data class="num" id="st-capturing">—</data></div>
+    <div class="cell"><span class="lbl">[ PENDING ]</span><data class="num" id="st-pending">—</data></div>
+    <div class="cell"><span class="lbl">[ PROCESSING ]</span><data class="num" id="st-processing">—</data></div>
+    <div class="cell" id="cell-failed"><span class="lbl">[ FAILED ]</span><data class="num" id="st-failed">—</data></div>
+    <div class="cell"><span class="lbl">[ TRANSCRIPTS ]</span><data class="num" id="st-trx">—</data></div>
+  </section>
+
+  <main>
+    <section class="panel p-workers">
+      <h2><span>[ WORKERS ]</span><span class="n" id="workers-n">N/—</span></h2>
+      <div class="scroll">
+        <table>
+          <thead><tr><th>ID</th><th>TYPE</th><th>STATUS</th><th>CURRENT TASK</th><th>HEARTBEAT</th></tr></thead>
+          <tbody id="workers-body"><tr><td colspan="5" class="load">▓▒░ ACQUIRING ░▒▓</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel p-sessions">
+      <h2><span>[ LIVE SESSIONS ]</span><span class="n" id="sessions-n">N/0</span></h2>
+      <div class="flt" id="flt">
+        <button data-f="" class="on">ALL</button>
+        <button data-f="DISCOVERED">DISCOVERED</button>
+        <button data-f="CAPTURING">CAPTURING</button>
+        <button data-f="ENDED">ENDED</button>
+        <button data-f="COMPLETED">COMPLETED</button>
+        <button data-f="FAILED">FAILED</button>
+      </div>
+      <div class="qbar">
+        <span class="tag">? SEARCH TRX</span>
+        <form id="q-form" autocomplete="off">
+          <input id="q-input" placeholder="keyword trong transcripts... (Enter)" spellcheck="false">
+          <button type="submit">FIND</button>
+        </form>
+      </div>
+      <div class="scroll">
+        <table>
+          <thead><tr><th>ID</th><th>HANDLE</th><th>STATUS</th><th>CHUNKS</th><th>TRX</th><th>AGE</th></tr></thead>
+          <tbody id="sessions-body"><tr><td colspan="6" class="load">▓▒░ ACQUIRING ░▒▓</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <aside class="panel p-detail">
+      <h2><span>[ SESSION DETAIL ]</span><span class="n" id="detail-id">#--</span></h2>
+      <div class="empty" id="d-empty">[ SELECT A SESSION ]<small>CLICK A ROW TO INSPECT CHUNKS + TRANSCRIPTS · ESC TO CLEAR</small></div>
+      <div id="d-body" hidden>
+        <div class="d-meta">
+          <div><span class="k">HANDLE</span><span class="v" id="d-handle">—</span></div>
+          <div><span class="k">STATUS</span><span class="v" id="d-status">—</span></div>
+          <div><span class="k">WORKER</span><span class="v" id="d-worker">—</span></div>
+          <div><span class="k">CREATED</span><span class="v" id="d-created">—</span></div>
+          <div><span class="k">STARTED</span><span class="v" id="d-started">—</span></div>
+          <div><span class="k">ENDED</span><span class="v" id="d-ended">—</span></div>
+          <div style="grid-column: 1 / -1;"><span class="k">STREAM</span><span class="v dim" id="d-stream">—</span></div>
+          <div style="grid-column: 1 / -1;" id="d-error-row" hidden><span class="k">ERROR</span><span class="v red" id="d-error">—</span></div>
+          <div style="grid-column: 1 / -1;" id="d-actions" hidden>
+            <button class="hud-btn" id="d-retry" style="margin-top:2px;">RETRY FAILED</button>
+          </div>
+        </div>
+        <div class="d-sec"><b>&gt;&gt; AUDIO CHUNKS</b> <span id="chunks-n"></span></div>
+        <div class="scroll" style="max-height:190px;">
+          <table>
+            <thead><tr><th>SEQ</th><th>STATUS</th><th>ATT</th><th>SIZE</th><th>AGE</th><th></th></tr></thead>
+            <tbody id="chunks-body"></tbody>
+          </table>
+        </div>
+        <div class="d-sec">
+          <span><b>&gt;&gt; TRANSCRIPTS</b> <span id="trx-n"></span></span>
+          <span>
+            <button class="mini" id="btn-merged">MERGED</button>
+            <button class="mini" id="btn-copy">COPY</button>
+          </span>
+        </div>
+        <div class="scroll" style="max-height:300px;" id="trx-list"></div>
+      </div>
+    </aside>
+
+    <section class="panel p-sources">
+      <h2><span>[ SOURCES ]</span><span class="n" id="sources-n">N/0</span></h2>
+      <div class="src-bar">
+        <span class="tag">&gt;&gt;&gt; REGISTER</span>
+        <form id="add-form" autocomplete="off">
+          <input id="new-handle" name="handle" placeholder="@tiktok_handle" required spellcheck="false">
+          <button type="submit">ADD</button>
+        </form>
+      </div>
+      <div class="scroll" style="max-height:300px;">
+        <table>
+          <thead><tr><th>ID</th><th>HANDLE</th><th>NAME</th><th>PLATFORM</th><th>ACTIVE</th><th></th></tr></thead>
+          <tbody id="sources-body"><tr><td colspan="6" class="load">▓▒░ ACQUIRING ░▒▓</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel p-jobs">
+      <h2><span>[ JOBS AUDIT ]</span><span class="n" id="jobs-n">N/0</span></h2>
+      <div class="scroll">
+        <table>
+          <thead><tr><th>TYPE</th><th>ENTITY</th><th>STATUS</th><th>DUR</th><th>AGE</th></tr></thead>
+          <tbody id="jobs-body"><tr><td colspan="5" class="load">▓▒░ ACQUIRING ░▒▓</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <span>REV 1.0.0 · UNIT/API-01 · HEARTBEAT 15S · POLL 5S</span>
+    <span><span class="red">///</span> © 2026 SELF-BROKER <span class="red">///</span> SCANLINE 60HZ</span>
+  </footer>
+
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<div class="modal" id="modal" hidden>
+  <div class="modal-panel">
+    <h2><span id="modal-title">[ OUTPUT ]</span><span><button id="modal-close">ESC ✕</button></span></h2>
+    <div class="modal-body" id="modal-body"></div>
+  </div>
+</div>
+<script>
+(() => {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const POLL = 5;
+  let countdown = 1, selectedId = null, ticks = 0, filter = "", detailData = null, playingId = null;
+  const player = new Audio();
+
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g,
+    (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+  async function api(path, opts) {
+    const r = await fetch(path, { headers: { "Content-Type": "application/json" }, ...opts });
+    if (!r.ok) throw new Error(r.status + " " + r.statusText);
+    return r.json();
+  }
+
+  function ago(iso) {
+    if (!iso) return "—";
+    let s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+    s = Math.round(s);
+    if (s < 60) return "T-" + s + "s";
+    if (s < 3600) return "T-" + Math.floor(s/60) + "m" + (s%60 ? (s%60)+"s" : "");
+    if (s < 86400) return "T-" + Math.floor(s/3600) + "h" + Math.floor((s%3600)/60) + "m";
+    return "T-" + Math.floor(s/86400) + "d" + Math.floor((s%86400)/3600) + "h";
+  }
+  function hm(iso) {
+    if (!iso) return "—";
+    return new Date(iso).toLocaleTimeString([], { hour12: false });
+  }
+  function fmtSize(b) {
+    if (!b && b !== 0) return "—";
+    if (b < 1024) return b + "B";
+    if (b < 1048576) return (b/1024).toFixed(1) + "K";
+    return (b/1048576).toFixed(1) + "M";
+  }
+  function stClass(s) {
+    if (["FAILED","STOPPED"].includes(s)) return "bad";
+    if (["COMPLETED","HEALTHY"].includes(s)) return "ok";
+    if (["PROCESSING","CAPTURING","RUNNING"].includes(s)) return "busy";
+    return "";
+  }
+  const badge = (s) => '<span class="st ' + stClass(s) + '">' + esc(s) + '</span>';
+
+  function setLink(ok) {
+    $("linkled").className = "led" + (ok ? "" : " bad");
+    $("linktxt").textContent = ok ? "OK" : "DOWN";
+    $("errbar").hidden = ok;
+  }
+
+  function renderStats(p) {
+    $("st-sources").textContent = p.active_sources ?? 0;
+    $("st-capturing").textContent = p.capturing ?? 0;
+    $("st-pending").textContent = p.chunks_pending ?? 0;
+    $("st-processing").textContent = p.chunks_processing ?? 0;
+    $("st-failed").textContent = p.chunks_failed ?? 0;
+    $("st-trx").textContent = p.transcripts_total ?? 0;
+    $("cell-failed").classList.toggle("alert", (p.chunks_failed ?? 0) > 0);
+  }
+
+  function toast(msg, bad) {
+    const t = $("toast");
+    t.textContent = msg;
+    t.className = "toast" + (bad ? " bad" : "");
+    t.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { t.hidden = true; }, 2600);
+  }
+  let toastTimer = null;
+
+  function renderWorkers(rows) {
+    $("workers-n").textContent = "N/" + rows.length;
+    if (!rows.length) { $("workers-body").innerHTML = '<tr><td colspan="5" class="dim">[ NO WORKERS REGISTERED ]</td></tr>'; return; }
+    $("workers-body").innerHTML = rows.map((w) => {
+      const stale = (w.seconds_since_heartbeat ?? 0) > 90;
+      return '<tr>' +
+        '<td class="dim">' + esc(w.id) + '</td>' +
+        '<td>' + esc(w.type).toUpperCase() + '</td>' +
+        '<td>' + badge(w.status) + '</td>' +
+        '<td class="dim" title="' + esc(w.current_task || "") + '">' + esc(w.current_task || "IDLE") + '</td>' +
+        '<td' + (stale ? ' class="red"' : ' class="dim"') + '>' + (stale ? "STALE " : "") + ago(w.last_heartbeat) + '</td>' +
+      '</tr>';
+    }).join("");
+  }
+
+  function renderSessions(rows) {
+    $("sessions-n").textContent = "N/" + rows.length;
+    if (!rows.length) { $("sessions-body").innerHTML = '<tr><td colspan="6" class="dim">[ NO SESSIONS ]</td></tr>'; return; }
+    $("sessions-body").innerHTML = rows.map((s) => {
+      const total = s.chunk_count || 0, done = s.chunks_completed || 0;
+      const pct = total ? Math.round(done / total * 100) : 0;
+      const prog = '<span class="prog' + (total && pct === 100 ? " full" : "") + '"><i style="width:' + pct + '%"></i></span>';
+      const sel = s.id === selectedId ? ' r-active' : "";
+      return '<tr class="rsel' + sel + '" data-id="' + s.id + '">' +
+        '<td class="dim">#' + s.id + '</td>' +
+        '<td>' + esc(s.handle || "") + '</td>' +
+        '<td title="' + esc(s.error || "") + '">' + badge(s.status) + '</td>' +
+        '<td>' + prog + ' <span class="dim">' + done + '/' + total + '</span></td>' +
+        '<td class="dim">' + (s.transcript_count || 0) + '</td>' +
+        '<td class="dim" title="' + esc(s.created_at || "") + '">' + ago(s.created_at) + '</td>' +
+      '</tr>';
+    }).join("");
+    $("sessions-body").querySelectorAll("tr.rsel").forEach((tr) => {
+      tr.addEventListener("click", () => selectSession(Number(tr.dataset.id)));
+    });
+  }
+
+  async function selectSession(id) {
+    selectedId = id;
+    detailData = null;
+    if (playingId !== null) { player.pause(); player.src = ""; playingId = null; }
+    $("d-empty").hidden = true;
+    $("d-body").hidden = false;
+    document.querySelectorAll("#sessions-body tr").forEach((tr) =>
+      tr.classList.toggle("r-active", Number(tr.dataset.id) === id));
+    await refreshDetail(true);
+  }
+
+  async function refreshDetail(force) {
+    if (!selectedId) return;
+    try {
+      const d = await api("/sessions/" + selectedId);
+      if (d.session.id !== selectedId) return;
+      detailData = d;
+      const s = d.session;
+      $("detail-id").textContent = "#" + s.id;
+      $("d-handle").textContent = s.handle || "—";
+      $("d-status").innerHTML = badge(s.status);
+      $("d-worker").textContent = s.worker_id || "—";
+      $("d-created").textContent = hm(s.created_at) + " · " + ago(s.created_at);
+      $("d-started").textContent = s.started_at ? hm(s.started_at) : "—";
+      $("d-ended").textContent = s.ended_at ? hm(s.ended_at) : "—";
+      $("d-stream").textContent = s.stream_url || "—";
+      $("d-error-row").hidden = !s.error;
+      $("d-error").textContent = s.error || "";
+
+      const failed = d.chunks.filter((c) => c.status === "FAILED").length;
+      $("d-actions").hidden = failed === 0;
+      $("d-retry").textContent = "RETRY FAILED (" + failed + ")";
+
+      $("chunks-n").textContent = "N/" + d.chunks.length;
+      $("chunks-body").innerHTML = d.chunks.map((c) => {
+        let ctl = "";
+        if (c.status === "COMPLETED" || c.status === "FAILED" || c.status === "PENDING") {
+          ctl += '<button class="act" data-play="' + c.id + '">' + (playingId === c.id ? "STOP" : "PLAY") + '</button>';
+        }
+        if (c.status === "FAILED") {
+          ctl += '<button class="act" data-retry="' + c.id + '">RETRY</button>';
+        }
+        return '<tr>' +
+        '<td class="dim">' + String(c.sequence).padStart(2, "0") + '</td>' +
+        '<td title="' + esc(c.error || "") + '">' + badge(c.status) + '</td>' +
+        '<td class="dim">' + c.attempts + '</td>' +
+        '<td class="dim">' + fmtSize(c.size_bytes) + '</td>' +
+        '<td class="dim" title="' + esc(c.created_at || "") + '">' + ago(c.created_at) + '</td>' +
+        '<td style="text-align:right;">' + ctl + '</td>' +
+        '</tr>';
+      }).join("") || '<tr><td colspan="6" class="dim">[ NO CHUNKS ]</td></tr>';
+
+      $("chunks-body").querySelectorAll("[data-play]").forEach((b) =>
+        b.addEventListener("click", () => playChunk(Number(b.dataset.play))));
+      $("chunks-body").querySelectorAll("[data-retry]").forEach((b) =>
+        b.addEventListener("click", async () => {
+          try {
+            await api("/chunks/" + b.dataset.retry + "/retry", { method: "POST" });
+            toast("CHUNK #" + b.dataset.retry + " REQUEUED → PENDING");
+            tick();
+          } catch (e) { toast("RETRY FAILED: " + e.message, true); }
+        }));
+
+      renderTrxList(d.transcripts || []);
+    } catch (e) {
+      if (force) { $("d-body").hidden = true; $("d-empty").hidden = false; $("detail-id").textContent = "#--"; }
+    }
+  }
+
+  function renderTrxList(trx) {
+    $("trx-n").textContent = "N/" + trx.length;
+    $("trx-list").innerHTML = trx.map((t) => {
+      const seq = t.sequence != null ? "SEQ " + String(t.sequence).padStart(2, "0") : "CHUNK #" + t.audio_chunk_id;
+      return '<div class="trx">' +
+        '<div class="h"><b>#' + t.id + '</b> · ' + seq + ' · ' + esc(t.language || "?") + ' · ' +
+        esc(t.stt_model || "?") + ' · ' + ago(t.created_at) + '</div>' +
+        '<p>' + esc(t.text) + '</p>' +
+        (t.analysis ? '<div class="analysis">' + esc(t.analysis) + '</div>' : "") +
+        '</div>';
+    }).join("") || '<div class="empty" style="padding:18px;">[ NO TRANSCRIPTS YET ]</div>';
+  }
+
+  function renderSources(rows) {
+    $("sources-n").textContent = "N/" + rows.length;
+    if (!rows.length) { $("sources-body").innerHTML = '<tr><td colspan="6" class="dim">[ NO SOURCES — REGISTER ONE ABOVE ]</td></tr>'; return; }
+    $("sources-body").innerHTML = rows.map((src) =>
+      '<tr>' +
+      '<td class="dim">#' + src.id + '</td>' +
+      '<td>' + esc(src.handle) + '</td>' +
+      '<td class="dim">' + esc(src.display_name || "—") + '</td>' +
+      '<td class="dim">' + esc(src.platform) + '</td>' +
+      '<td>' + badge(src.is_active ? "HEALTHY" : "STOPPED") + '</td>' +
+      '<td style="text-align:right;">' +
+        '<button class="act' + (src.is_active ? "" : " off") + '" data-tg="' + src.id + '">' + (src.is_active ? "STOP" : "ARM") + '</button>' +
+        '<button class="act" data-del="' + src.id + '">DEL</button>' +
+      '</td></tr>').join("");
+    $("sources-body").querySelectorAll("[data-tg]").forEach((b) =>
+      b.addEventListener("click", async () => {
+        const id = Number(b.dataset.tg);
+        const cur = rows.find((x) => x.id === id);
+        try { await api("/sources/" + id, { method: "PATCH", body: JSON.stringify({ is_active: !cur.is_active }) }); loadSources(); }
+        catch (e) { setLink(false); }
+      }));
+    $("sources-body").querySelectorAll("[data-del]").forEach((b) =>
+      b.addEventListener("click", async () => {
+        if (!b.classList.contains("armed")) {
+          b.classList.add("armed"); b.textContent = "SURE?";
+          setTimeout(() => { b.classList.remove("armed"); b.textContent = "DEL"; }, 2500);
+          return;
+        }
+        try { await api("/sources/" + b.dataset.del, { method: "DELETE" }); loadSources(); }
+        catch (e) { setLink(false); }
+      }));
+  }
+
+  async function loadSources() {
+    try { renderSources(await api("/sources")); } catch (e) { setLink(false); }
+  }
+
+  function openModal(title, html) {
+    $("modal-title").textContent = title;
+    $("modal-body").innerHTML = html;
+    $("modal").hidden = false;
+  }
+  function closeModal() { $("modal").hidden = true; }
+  $("modal-close").addEventListener("click", closeModal);
+  $("modal").addEventListener("click", (ev) => { if (ev.target === $("modal")) closeModal(); });
+
+  $("flt").querySelectorAll("button").forEach((b) =>
+    b.addEventListener("click", () => {
+      filter = b.dataset.f;
+      $("flt").querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === b));
+      countdown = POLL;
+      tick();
+    }));
+
+  $("q-form").addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const q = $("q-input").value.trim();
+    if (!q) return;
+    try {
+      const rows = await api("/transcripts?q=" + encodeURIComponent(q) + "&limit=100");
+      openModal("[ SEARCH /// \"" + q.toUpperCase() + "\" ]",
+        rows.map((t) =>
+          '<div class="trx" style="cursor:pointer;" data-goto="' + t.live_session_id + '">' +
+          '<div class="h"><b>#' + t.live_session_id + '</b> · ' + esc(t.handle || "?") + ' · SEQ ' +
+          String(t.sequence ?? 0).padStart(2, "0") + ' · ' + ago(t.created_at) + '</div>' +
+          '<p>' + esc(t.text) + '</p>' +
+          (t.analysis ? '<div class="analysis">' + esc(t.analysis) + '</div>' : "") +
+          '</div>').join("") ||
+        '<div class="empty" style="padding:30px;">[ NO MATCH IN TRANSCRIPTS ]</div>');
+      $("modal-body").querySelectorAll("[data-goto]").forEach((el) =>
+        el.addEventListener("click", () => {
+          closeModal();
+          selectSession(Number(el.dataset.goto));
+        }));
+    } catch (e) { toast("SEARCH FAILED: " + e.message, true); }
+  });
+
+  $("btn-merged").addEventListener("click", () => {
+    if (!detailData) return;
+    const trx = detailData.transcripts || [];
+    openModal("[ TRANSCRIPT /// SESSION #" + selectedId + " ]",
+      trx.map((t) =>
+        '<div class="trx">' +
+        '<div class="h"><b>SEQ ' + String(t.sequence ?? 0).padStart(2, "0") + '</b> · ' +
+        esc(t.language || "?") + ' · ' + esc(t.stt_model || "?") + '</div>' +
+        '<p>' + esc(t.text) + '</p>' +
+        (t.analysis ? '<div class="analysis">' + esc(t.analysis) + '</div>' : "") +
+        '</div>').join("") ||
+      '<div class="empty" style="padding:30px;">[ NO TRANSCRIPTS YET ]</div>');
+  });
+
+  $("btn-copy").addEventListener("click", async () => {
+    if (!detailData) return;
+    const text = (detailData.transcripts || [])
+      .map((t) => "[SEQ " + String(t.sequence ?? 0).padStart(2, "0") + "] " + t.text +
+        (t.analysis ? "\n>> ANALYSIS: " + t.analysis : ""))
+      .join("\n\n");
+    try { await navigator.clipboard.writeText(text); toast("TRANSCRIPT COPIED (" + text.length + " CHARS)"); }
+    catch (e) { toast("CLIPBOARD BLOCKED", true); }
+  });
+
+  $("d-retry").addEventListener("click", async () => {
+    if (!selectedId) return;
+    try {
+      const r = await api("/sessions/" + selectedId + "/retry", { method: "POST" });
+      toast("REQUEUED " + r.retried + " FAILED CHUNK(S)");
+      tick();
+    } catch (e) { toast("RETRY FAILED: " + e.message, true); }
+  });
+
+  $("btn-recover").addEventListener("click", async (ev) => {
+    const b = ev.currentTarget;
+    b.classList.add("busy");
+    try {
+      const r = await api("/recover", { method: "POST" });
+      const n = (r.recovered_chunks || 0) + (r.recovered_sessions || 0);
+      const extra = (r.abandoned_sessions || 0) + " abandoned, " + (r.completed_sessions || 0) + " completed";
+      toast("RECOVERY DONE: " + (r.recovered_chunks || 0) + " CHUNKS RESET · " + extra);
+      countdown = POLL;
+      tick();
+    } catch (e) { toast("RECOVERY FAILED: " + e.message, true); }
+    finally { b.classList.remove("busy"); }
+  });
+
+  $("add-form").addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const input = $("new-handle");
+    try {
+      await api("/sources", { method: "POST", body: JSON.stringify({ handle: input.value.trim() }) });
+      input.value = "";
+      loadSources();
+    } catch (e) { setLink(false); }
+  });
+
+  function playChunk(cid) {
+    if (playingId === cid) {
+      player.pause(); player.src = ""; playingId = null;
+      refreshDetail(false);
+      return;
+    }
+    player.src = "/chunks/" + cid + "/audio";
+    player.play().then(() => {
+      playingId = cid;
+      toast("STREAMING CHUNK #" + cid);
+      refreshDetail(false);
+    }).catch((e) => toast("PLAYBACK ERROR: " + e.message, true));
+  }
+  player.addEventListener("ended", () => { playingId = null; refreshDetail(false); });
+
+  function renderJobs(rows) {
+    $("jobs-n").textContent = "N/" + rows.length;
+    if (!rows.length) { $("jobs-body").innerHTML = '<tr><td colspan="5" class="dim">[ NO JOBS LOGGED ]</td></tr>'; return; }
+    $("jobs-body").innerHTML = rows.map((j) => {
+      const dur = j_dur(j);
+      return '<tr>' +
+        '<td>' + esc(j.type).toUpperCase() + '</td>' +
+        '<td class="dim">' + esc(j.entity_type) + '#' + j.entity_id + '</td>' +
+        '<td title="' + esc(j.error || "") + '">' + badge(j.status) + '</td>' +
+        '<td class="dim">' + dur + '</td>' +
+        '<td class="dim" title="' + esc(j.started_at || "") + '">' + ago(j.started_at) + '</td>' +
+      '</tr>';
+    }).join("");
+  }
+
+  function j_dur(j) {
+    if (!j.started_at) return "—";
+    const end = j.finished_at ? new Date(j.finished_at).getTime() : Date.now();
+    let s = Math.round((end - new Date(j.started_at).getTime()) / 1000);
+    if (s < 60) return s + "s";
+    if (s < 3600) return Math.floor(s / 60) + "m" + (s % 60) + "s";
+    return Math.floor(s / 3600) + "h" + Math.floor((s % 3600) / 60) + "m";
+  }
+
+  async function tick() {
+    if (document.hidden) return;
+    ticks++;
+    try {
+      const [health, sessions, jobs] = await Promise.all([
+        api("/health"), api("/sessions?limit=50" + (filter ? "&status=" + filter : "")), api("/jobs?limit=20"),
+      ]);
+      renderStats(health.pipeline);
+      renderWorkers(health.workers || []);
+      renderSessions(sessions);
+      renderJobs(jobs);
+      setLink(true);
+      if (selectedId) refreshDetail(false);
+    } catch (e) { setLink(false); }
+    if (ticks % 6 === 0) loadSources();
+  }
+
+  setInterval(() => {
+    countdown--;
+    if (countdown <= 0) { countdown = POLL; tick(); }
+    $("sync").textContent = String(countdown).padStart(2, "0");
+    $("clock").textContent = new Date().toLocaleTimeString([], { hour12: false });
+  }, 1000);
+
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) tick(); });
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key === "r" && ev.target.tagName !== "INPUT") { countdown = POLL; tick(); }
+    if (ev.key === "Escape") {
+      if (!$("modal").hidden) { closeModal(); return; }
+      selectedId = null; detailData = null;
+      player.pause(); player.src = ""; playingId = null;
+      $("d-body").hidden = true; $("d-empty").hidden = false;
+      $("detail-id").textContent = "#--";
+      document.querySelectorAll("#sessions-body tr").forEach((tr) => tr.classList.remove("r-active"));
+    }
+  });
+
+  tick();
+  loadSources();
+})();
+</script>
+</body>
+</html>

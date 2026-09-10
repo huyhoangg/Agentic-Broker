@@ -1,8 +1,15 @@
 .env
+__pycache__/
+*.pyc
+.DS_Store
+
+# local worker artifacts
+tmp/
+recordings/
+*.mp3
+*.webm*
+*.wav
+
+# node / frontend (legacy)
 node_modules/
 dist/
-recordings/
-bin/
-*.wav
-.DS_Store
-__pycache__/

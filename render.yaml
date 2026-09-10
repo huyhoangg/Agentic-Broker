@@ -1,14 +1,101 @@
 services:
-  - type: worker
-    name: tiktok-broker-audio-assistant
+  # Control-plane API (health, sources CRUD, pipeline views)
+  - type: web
+    name: self-broker-api
     env: docker
     dockerfilePath: ./Dockerfile
-    repo: https://github.com/YOUR_GITHUB_USERNAME/self-broker
+    healthCheckPath: /health
     envVars:
-      - key: TIKTOK_CHANNEL
-        value: "@broker_account_name"
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: SUPABASE_PW
+        sync: false
+      - key: SUPABASE_DB_HOST
+        sync: false
+      - key: SUPABASE_BUCKET
+        value: broker-agent
+      - key: GROQ_API_KEY
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+
+  # Detects live sources, registers sessions, runs recovery sweeps
+  - type: worker
+    name: self-broker-scanner
+    env: docker
+    dockerfilePath: ./Dockerfile
+    dockerCommand: python -m app.scanner
+    envVars:
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: SUPABASE_PW
+        sync: false
+      - key: SUPABASE_DB_HOST
+        sync: false
+      - key: SUPABASE_BUCKET
+        value: broker-agent
       - key: CHECK_INTERVAL
-        value: "180"
+        value: "120"
+      - key: SOURCE_HANDLES
+        value: "@chng.khon.cng.win,@nguyen.thuan.invest,@pth.stock"
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+
+  # Records live audio into chunks and uploads them
+  - type: worker
+    name: self-broker-capture
+    env: docker
+    dockerfilePath: ./Dockerfile
+    dockerCommand: python -m app.capture
+    envVars:
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: SUPABASE_PW
+        sync: false
+      - key: SUPABASE_DB_HOST
+        sync: false
+      - key: SUPABASE_BUCKET
+        value: broker-agent
+      - key: CHUNK_SECONDS
+        value: "300"
+      - key: CAPTURE_CONCURRENCY
+        value: "3"
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+
+  # Transcribes chunks via Groq Whisper
+  - type: worker
+    name: self-broker-stt
+    env: docker
+    dockerfilePath: ./Dockerfile
+    dockerCommand: python -m app.stt
+    envVars:
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: SUPABASE_PW
+        sync: false
+      - key: SUPABASE_DB_HOST
+        sync: false
+      - key: SUPABASE_BUCKET
+        value: broker-agent
+      - key: GROQ_API_KEY
+        sync: false
+      - key: ANALYZE_WITH_LLM
+        value: "true"
       - key: TELEGRAM_BOT_TOKEN
         sync: false
       - key: TELEGRAM_CHAT_ID
