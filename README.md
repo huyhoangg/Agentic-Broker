@@ -85,9 +85,21 @@ python -m app.stt       # terminal 3
 uvicorn app.api.main:app --port 8000   # terminal 4
 ```
 
+## Console (trang độc lập)
+
+`console/index.html` là trang tĩnh độc lập — không cần backend phục vụ nó, gọi thẳng tới API (local hoặc Render):
+
+1. Mở file (double-click) hoặc host tĩnh bất kỳ đâu (Render Static Site / GitHub Pages / Vercel)
+2. Vào **Cài đặt** → nhập API base URL (VD `https://self-broker-api.onrender.com`) + Console token → Lưu (lưu localStorage)
+3. Nếu API đặt biến `CONSOLE_TOKEN` thì mọi request phải kèm token (header `X-Console-Token`); `/health` luôn mở cho health check
+
 ## Deploy (Render)
 
-`render.yaml` khai báo 4 service: `api` (web) + `scanner` / `capture` / `stt` (worker), chung một Docker image, secrets để `sync: false` (điền trong Render Dashboard).
+`render.yaml` khai báo 5 service: `console` (static) + `api` (web) + `scanner` / `capture` / `stt` (worker), chung một Docker image cho các service Python, secrets để `sync: false` (điền trong Render Dashboard).
+
+- API trên Render đặt `WORKER_CONTROL=0` — worker là service riêng của Render, không điều khiển start/stop qua API
+- Đặt `CONSOLE_TOKEN` (chuỗi bí mật tùy ý) trên API và điền cùng giá trị vào Console → Cài đặt
+- Sau khi deploy, mở URL của `self-broker-console` → Cài đặt → dán URL của `self-broker-api`
 
 ## State machines
 

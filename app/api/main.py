@@ -10,7 +10,7 @@ from typing import Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -28,10 +28,28 @@ import signal as _signal
 
 faulthandler.register(_signal.SIGUSR1)
 
-CONSOLE_DIR = Path(__file__).resolve().parent / "console"
 ROOT_DIR = Path(__file__).resolve().parents[2]
 PID_DIR = ROOT_DIR / "tmp"
 WORKER_TYPES = ("scanner", "capture", "stt")
+
+# Shared-secret auth for the standalone console (set CONSOLE_TOKEN to enable).
+# Health stays open for Render health checks.
+CONSOLE_TOKEN = os.getenv("CONSOLE_TOKEN", "")
+OPEN_PATHS = {"/health", "/docs", "/openapi.json", "/redoc"}
+
+
+@app.middleware("http")
+async def auth_guard(request, call_next):
+    if CONSOLE_TOKEN and request.url.path not in OPEN_PATHS:
+        supplied = request.headers.get("X-Console-Token") or request.query_params.get("token")
+        if supplied != CONSOLE_TOKEN:
+            return JSONResponse({"detail": "unauthorized"}, status_code=401)
+    return await call_next(request)
+
+
+# Worker process control is only meaningful where the API can spawn processes
+# (local machine). On Render, workers are separate services — disable it there.
+WORKER_CONTROL = os.getenv("WORKER_CONTROL", "1") in ("1", "true", "yes")
 
 
 @app.get("/", include_in_schema=False)
@@ -224,7 +242,10 @@ def retry_session_chunks(session_id: int):
 
 
 @app.get("/chunks/{chunk_id}/audio")
-def chunk_audio(chunk_id: int):
+def chunk_audio(chunk_id: int, token: Optional[str] = None):
+    # token also accepted as query param: <audio> tags cannot send headers
+    if CONSOLE_TOKEN and token != CONSOLE_TOKEN:
+        raise HTTPException(401, "unauthorized")
     row = db.fetch_one(
         "SELECT storage_path FROM audio_chunks WHERE id = %s", (chunk_id,)
     )
@@ -364,6 +385,8 @@ def list_scripts():
 
 @app.post("/scripts/{wtype}/start")
 def start_script(wtype: str):
+    if not WORKER_CONTROL:
+        raise HTTPException(403, "worker control disabled on this deployment")
     if wtype not in WORKER_TYPES:
         raise HTTPException(404, "unknown worker type")
     pid = _read_pid(wtype)
@@ -473,6 +496,7 @@ def browse_storage(prefix: str = "", limit: int = 200):
     return res.json()
 
 
+CONSOLE_DIR = Path(__file__).resolve().parent / "console"
 app.mount("/console", StaticFiles(directory=CONSOLE_DIR, html=True), name="console")
 
 

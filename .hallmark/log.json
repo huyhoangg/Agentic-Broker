@@ -1,0 +1,7 @@
+[
+  { "date": "2026-09-10", "macrostructure": "app-shell (sidebar + topbar + dense panels)", "theme": "design.md (Prisma system — locked)", "enrichment": "none", "brief": "Self-Broker console · build theo DESIGN.md root: teal #16a394, DM Sans+Inter, hairline 6/10px" },
+  { "date": "2026-09-10", "macrostructure": "app-shell (sidebar + topbar + dense panels)", "theme": "Grid", "enrichment": "none", "brief": "Self-Broker console · app platform UI, skin Grid (user từ chối dạng landing)" },
+  { "date": "2026-09-10", "macrostructure": "app-shell (sidebar + topbar + dense panels)", "theme": "Midnight", "enrichment": "none", "brief": "Self-Broker console · app platform UI, skin Midnight" },
+  { "date": "2026-09-10", "macrostructure": "app-shell (sidebar + topbar + dense panels)", "theme": "Terminal", "enrichment": "none", "brief": "Self-Broker console · app platform UI, skin Terminal (all-mono, tĩnh)" },
+  { "date": "2026-09-10", "macrostructure": "app-shell (sidebar + topbar + dense panels)", "theme": "Cobalt", "enrichment": "none", "brief": "Self-Broker console · app platform UI + ⌘K palette, skin Cobalt" }
+]

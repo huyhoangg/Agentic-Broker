@@ -1,11 +1,26 @@
 services:
-  # Control-plane API (health, sources CRUD, pipeline views)
+  # Standalone console (static page, gọi thẳng tới self-broker-api)
+  - type: web
+    name: self-broker-console
+    env: static
+    buildCommand: echo "static console"
+    staticPublishPath: ./console
+    headers:
+      - path: /*
+        name: Cache-Control
+        value: no-cache
+
+  # Control-plane API (health, sources CRUD, pipeline views, script control)
   - type: web
     name: self-broker-api
     env: docker
     dockerfilePath: ./Dockerfile
     healthCheckPath: /health
     envVars:
+      - key: CONSOLE_TOKEN
+        sync: false
+      - key: WORKER_CONTROL
+        value: "0"
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_KEY

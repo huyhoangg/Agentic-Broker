@@ -1,42 +1,58 @@
 import logging
 import threading
+import time
 
 import psycopg2
 import psycopg2.extras
+import psycopg2.pool
 
 from . import config
 
 log = logging.getLogger("db")
 
-_local = threading.local()
+_pool: psycopg2.pool.ThreadedConnectionPool | None = None
+_lock = threading.Lock()
+
+# Supabase session pooler caps concurrent clients (pool_size 15), so every
+# process shares a small pool on the transaction pooler instead.
+POOL_MIN = 1
+POOL_MAX = 6
+
+
+def _get_pool() -> psycopg2.pool.ThreadedConnectionPool:
+    global _pool
+    if _pool is None:
+        with _lock:
+            if _pool is None:
+                _pool = psycopg2.pool.ThreadedConnectionPool(
+                    POOL_MIN, POOL_MAX, dsn=config.database_dsn()
+                )
+    return _pool
+
+
+def _acquire():
+    last = None
+    for _ in range(10):
+        try:
+            return _get_pool().getconn()
+        except psycopg2.pool.PoolError as e:
+            last = e
+            time.sleep(0.2)
+    raise last
+
+
+def _release(conn, broken: bool):
+    _get_pool().putconn(conn, close=broken)
 
 
 def _connect():
     return psycopg2.connect(config.database_dsn())
 
 
-def _get_conn():
-    conn = getattr(_local, "conn", None)
-    if conn is not None and not conn.closed:
-        return conn
-    conn = _connect()
-    _local.conn = conn
-    return conn
-
-
-def _reset_conn():
-    conn = getattr(_local, "conn", None)
-    if conn is not None:
-        try:
-            conn.close()
-        except Exception:
-            pass
-    _local.conn = None
-
-
 def _run(query, params, fetch):
     for attempt in range(2):
-        conn = _get_conn()
+        conn = _acquire()
+        broken = False
         try:
             with conn:
                 with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -48,9 +64,11 @@ def _run(query, params, fetch):
                     return cur.rowcount
         except psycopg2.Error as e:
             log.warning("db error (attempt %s): %s", attempt + 1, e)
-            _reset_conn()
+            broken = True
             if attempt == 1:
                 raise
+        finally:
+            _release(conn, broken)
     return None
 
 
@@ -68,7 +86,8 @@ def execute(query, params=None):
 
 def _claim(worker_id: str, select_sql: str, update_sql: str, extra_sql=None) -> dict | None:
     """Generic single-row claim inside one FOR UPDATE SKIP LOCKED transaction."""
-    conn = _get_conn()
+    conn = _acquire()
+    broken = False
     try:
         with conn:
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -81,8 +100,10 @@ def _claim(worker_id: str, select_sql: str, update_sql: str, extra_sql=None) -> 
                     extra_sql(cur, row)
                 return dict(row)
     except psycopg2.Error as e:
-        _reset_conn()
+        broken = True
         raise
+    finally:
+        _release(conn, broken)
 
 
 def claim_session(worker_id: str) -> dict | None:
