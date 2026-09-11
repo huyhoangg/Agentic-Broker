@@ -107,8 +107,13 @@ def recover() -> dict:
 
 def main():
     global running
-    signal.signal(signal.SIGINT, _stop)
-    signal.signal(signal.SIGTERM, _stop)
+    if threading.current_thread() is threading.main_thread():
+        try:
+            signal.signal(signal.SIGINT, _stop)
+            signal.signal(signal.SIGTERM, _stop)
+        except (ValueError, OSError):
+            pass
+
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s %(message)s"
     )

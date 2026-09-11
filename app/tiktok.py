@@ -49,7 +49,7 @@ def resolve_live_stream_url(handle: str) -> str | None:
     except Exception:
         pass
 
-    # Method 2: curl_cffi SIGI_STATE extraction
+    # Method 2: curl_cffi SIGI_STATE & __UNIVERSAL_DATA_FOR_REHYDRATION__ extraction
     try:
         from curl_cffi import requests as c_requests
 
@@ -60,16 +60,45 @@ def resolve_live_stream_url(handle: str) -> str | None:
             timeout=12,
         )
         if res.status_code == 200 and len(res.text) > 10000:
-            m = re.search(
+            # Check SIGI_STATE
+            m_sigi = re.search(
                 r'<script id="SIGI_STATE" type="application/json">(.*?)</script>', res.text
             )
-            if m:
-                room = json.loads(m.group(1)).get("CurrentRoom", {}).get("roomInfo", {})
-                if room.get("status") in (2, 1, "2", "1"):
-                    stream = room.get("stream_url", {})
-                    hls = stream.get("hls_pull_url") or stream.get("flv_pull_url", {}).get("FULL_HD1")
-                    if hls:
-                        return hls
+            if m_sigi:
+                try:
+                    room = json.loads(m_sigi.group(1)).get("CurrentRoom", {}).get("roomInfo", {})
+                    if room.get("status") in (2, 1, "2", "1"):
+                        stream = room.get("stream_url", {})
+                        flv = stream.get("flv_pull_url", {})
+                        hls = stream.get("hls_pull_url") or (
+                            flv.get("FULL_HD1") if isinstance(flv, dict) else None
+                        )
+                        if hls:
+                            return hls
+                except Exception:
+                    pass
+
+            # Check __UNIVERSAL_DATA_FOR_REHYDRATION__
+            m_univ = re.search(
+                r'<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application/json">(.*?)</script>',
+                res.text,
+            )
+            if m_univ:
+                try:
+                    data = json.loads(m_univ.group(1))
+                    scope = data.get("__DEFAULT_SCOPE__", {})
+                    room_info = scope.get("webapp.live-detail", {}).get("liveRoomInfo", {})
+                    status = room_info.get("status")
+                    if status in (2, 1, "2", "1"):
+                        stream_obj = room_info.get("stream_url", {})
+                        flv = stream_obj.get("flv_pull_url", {})
+                        hls = stream_obj.get("hls_pull_url") or (
+                            flv.get("FULL_HD1") if isinstance(flv, dict) else None
+                        )
+                        if hls:
+                            return hls
+                except Exception:
+                    pass
     except Exception:
         pass
 
@@ -94,3 +123,4 @@ def resolve_live_stream_url(handle: str) -> str | None:
         pass
 
     return None
+

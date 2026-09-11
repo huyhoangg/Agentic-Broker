@@ -21,6 +21,10 @@ services:
         sync: false
       - key: WORKER_CONTROL
         value: "0"
+      - key: EMBEDDED_WORKERS
+        value: "1"
+      - key: SOURCE_HANDLES
+        value: "@chng.khon.cng.win,@nguyen.thuan.invest,@pth.stock"
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_KEY
@@ -37,6 +41,7 @@ services:
         sync: false
       - key: TELEGRAM_CHAT_ID
         sync: false
+
 
   # Detects live sources, registers sessions, runs recovery sweeps
   - type: worker

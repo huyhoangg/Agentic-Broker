@@ -283,6 +283,9 @@ def list_workers():
     return db.fetch_all("SELECT * FROM workers ORDER BY type, id")
 
 
+EMBEDDED_WORKERS = os.getenv("EMBEDDED_WORKERS", "1" if not WORKER_CONTROL else "0") in ("1", "true", "yes")
+
+
 @app.on_event("startup")
 def startup_event():
     import threading
@@ -291,6 +294,17 @@ def startup_event():
     t = threading.Thread(target=start_telegram_command_poller, daemon=True)
     t.start()
     log.info("Started Telegram Bot Command Poller & Price Notifier thread.")
+
+    if EMBEDDED_WORKERS:
+        from ..scanner.__main__ import main as scanner_main
+        from ..capture.__main__ import main as capture_main
+        from ..stt.__main__ import main as stt_main
+
+        threading.Thread(target=scanner_main, daemon=True, name="scanner-worker").start()
+        threading.Thread(target=capture_main, daemon=True, name="capture-worker").start()
+        threading.Thread(target=stt_main, daemon=True, name="stt-worker").start()
+        log.info("Started Embedded Pipeline Workers (scanner, capture, stt).")
+
 
 
 # --- script (worker process) control ---

@@ -86,8 +86,13 @@ def process_chunk(chunk: dict, hb: Heartbeat):
 
 
 def main():
-    signal.signal(signal.SIGINT, lambda *_: stop_event.set())
-    signal.signal(signal.SIGTERM, lambda *_: stop_event.set())
+    if threading.current_thread() is threading.main_thread():
+        try:
+            signal.signal(signal.SIGINT, lambda *_: stop_event.set())
+            signal.signal(signal.SIGTERM, lambda *_: stop_event.set())
+        except (ValueError, OSError):
+            pass
+
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s %(message)s"
     )
