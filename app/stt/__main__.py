@@ -6,7 +6,7 @@ import sys
 import threading
 import time
 
-from .. import config, db, storage
+from .. import config, db, storage, telegram
 from ..heartbeat import Heartbeat
 from . import engines
 
@@ -64,6 +64,27 @@ def process_chunk(chunk: dict, hb: Heartbeat):
             (chunk.get("job_id"),),
         )
         log.info("chunk %s completed: %s", cid, text[:80])
+
+        # Notify Telegram with chunk transcript & AI summary
+        try:
+            src = db.fetch_one(
+                """
+                SELECT s.handle FROM live_sessions ls
+                JOIN sources s ON s.id = ls.source_id
+                WHERE ls.id = %s
+                """,
+                (chunk["live_session_id"],),
+            )
+            handle = src["handle"] if src else "TikTok"
+            analysis_text = f"\n\n💡 <b>Phân tích AI:</b>\n{analysis}" if (config.ANALYZE_WITH_LLM and analysis) else ""
+            telegram.send_message(
+                f"📝 <b>BÓC TÁCH ÂM THANH LIVE</b> (<code>{handle}</code> - Chunk #{chunk['sequence']})\n\n"
+                f"🗣️ <b>Trích đoạn nói:</b>\n<i>{text[:450]}...</i>"
+                f"{analysis_text}"
+            )
+        except Exception as e:
+            log.warning("telegram notify error for chunk %s: %s", cid, e)
+
 
     except Exception as e:
         log.exception("chunk %s failed: %s", cid, e)

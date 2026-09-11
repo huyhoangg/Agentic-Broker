@@ -60,12 +60,15 @@ def scan_sources() -> int:
         )
         if session:
             log.info("%s: LIVE -> session #%s created", handle, session["id"])
+            clean_handle = handle.replace("@", "").strip()
             telegram.send_message(
-                f"🔴 <b>PHÁT HIỆN LIVE MỚI</b>\n"
-                f"👤 Kênh: <code>{handle}</code>\n"
-                f"🆔 Session: <code>#{session['id']}</code>\n"
-                f"⏳ Đang chờ capture worker..."
+                f"🔴 <b>KÊNH TIKTOK ĐANG phát TRỰC TIẾP (LIVE)!</b>\n\n"
+                f"👤 <b>Kênh:</b> <code>{handle}</code>\n"
+                f"🔗 <b>Link Live:</b> https://www.tiktok.com/@{clean_handle}/live\n"
+                f"🆔 <b>Session ID:</b> <code>#{session['id']}</code>\n\n"
+                f"🎙️ <i>Hệ thống tự động khởi tạo thu âm audio (.mp3) & bóc tách nội dung...</i>"
             )
+
         else:
             log.info("%s: live, session already active", handle)
 
