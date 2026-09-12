@@ -283,7 +283,8 @@ def list_workers():
     return db.fetch_all("SELECT * FROM workers ORDER BY type, id")
 
 
-EMBEDDED_WORKERS = os.getenv("EMBEDDED_WORKERS", "1" if not WORKER_CONTROL else "0") in ("1", "true", "yes")
+EMBEDDED_WORKERS = os.getenv("EMBEDDED_WORKERS", "1").lower() in ("1", "true", "yes")
+
 
 
 @app.on_event("startup")
